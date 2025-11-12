@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Глобальные переменные для пагинации
+# Global variables for pagination
 declare -g IMAGES_CURRENT_PAGE=1
 declare -g IMAGES_TOTAL_PAGES=1
 declare -g IMAGES_TOTAL_ITEMS=0
@@ -8,7 +8,7 @@ declare -g CONTAINERS_CURRENT_PAGE=1
 declare -g CONTAINERS_TOTAL_PAGES=1
 declare -g CONTAINERS_TOTAL_ITEMS=0
 
-# Цвета для меню
+# Colors for menu
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -18,13 +18,13 @@ CYAN='\033[0;36m'
 ORANGE='\033[0;33m'
 NC='\033[0m' # No Color
 
-# Функция для безопасного чтения ввода с поддержкой скрытого ввода
+# Function for safe input reading with hidden input support
 safe_read() {
     local secret=0
     local timeout=0
     local timeout_value=0
     
-    # Проверяем флаги
+    # Check flags
     while [[ $# -gt 0 ]]; do
         case $1 in
             -s|--secret)
@@ -49,41 +49,41 @@ safe_read() {
     while true; do
         echo -ne "$prompt"
         if [ $secret -eq 1 ]; then
-            # Скрытый ввод для паролей
+            # Hidden input for passwords
             stty -echo
             IFS= read -r -n "$max_chars" "$var_name"
             local ret=$?
             stty echo
-            echo ""  # Добавляем новую строку после скрытого ввода
+            echo ""  # Add new line after hidden input
         elif [ $timeout -eq 1 ]; then
-            # Ввод с таймаутом
+            # Input with timeout
             if IFS= read -r -t $timeout_value -n "$max_chars" "$var_name"; then
                 local ret=0
             else
                 local ret=1
             fi
         else
-            # Обычный ввод
+            # Regular input
             IFS= read -r -n "$max_chars" "$var_name"
             local ret=$?
         fi
         
-        # Обработка Ctrl+C
+        # Handle Ctrl+C
         if [ $ret -ne 0 ]; then
             echo ""
-            echo -e "${YELLOW}⚠️  Прервано пользователем${NC}"
+            echo -e "${YELLOW}⚠️  Cancelled by user${NC}"
             return 1
         fi
         
-        # Очистка буфера ввода если есть лишние символы
+        # Clear input buffer if there are extra characters
         if [ -n "${!var_name}" ]; then
             local extra_chars
             IFS= read -r -t 0.1 -n 1000 extra_chars || true
         fi
         
-        # Игнорирование escape-последовательностей от мыши
+        # Ignore mouse escape sequences
         if [[ "${!var_name}" =~ ^[[:cntrl:]] ]]; then
-            echo -e "${RED}❌ Недопустимый ввод. Используйте только цифры и буквы.${NC}"
+            echo -e "${RED}❌ Invalid input. Use only numbers and letters.${NC}"
             continue
         fi
         
@@ -92,7 +92,7 @@ safe_read() {
     return 0
 }
 
-# Функция для преобразования размера в байты
+# Function to convert size to bytes
 size_to_bytes() {
     local size=$1
     if [ -z "$size" ]; then
@@ -100,7 +100,7 @@ size_to_bytes() {
         return
     fi
     
-    # Удаляем пробелы и преобразуем в нижний регистр
+    # Remove spaces and convert to lowercase
     size=$(echo "$size" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
     
     if [[ $size == *"gib" ]]; then
@@ -129,7 +129,7 @@ size_to_bytes() {
     fi
 }
 
-# Функция для форматирования байт в человеко-читаемый вид
+# Function to format bytes to human readable format
 format_bytes() {
     local bytes=$1
     if [ -z "$bytes" ] || [ "$bytes" -eq 0 ]; then
@@ -150,7 +150,7 @@ format_bytes() {
             echo "${bytes}B"
         fi
     else
-        # Простой расчет если bc не установлен
+        # Simple calculation if bc is not installed
         if [ "$bytes" -ge 1099511627776 ]; then
             echo "$((bytes / 1099511627776))TiB"
         elif [ "$bytes" -ge 1073741824 ]; then
@@ -165,7 +165,7 @@ format_bytes() {
     fi
 }
 
-# Функция для получения IP контейнера
+# Function to get container IP
 get_container_ip() {
     local container_id=$1
     local ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_id" 2>/dev/null)
@@ -176,18 +176,18 @@ get_container_ip() {
     fi
 }
 
-# Функция для получения использования памяти контейнера - УПРОЩЕННАЯ
+# Function to get container memory usage - SIMPLIFIED
 get_container_memory() {
     local container_id=$1
     local status=$2
     
-    # Для остановленных контейнеров не показываем использование памяти
+    # Don't show memory usage for stopped containers
     if [[ "$status" != *"Up"* ]]; then
         echo "-"
         return
     fi
     
-    # Получаем использование памяти через docker stats
+    # Get memory usage via docker stats
     local memory=$(docker stats --no-stream --format "{{.MemUsage}}" "$container_id" 2>/dev/null | cut -d'/' -f1 | tr -d ' ')
     
     if [ -z "$memory" ] || [ "$memory" = "0B" ]; then
@@ -197,13 +197,13 @@ get_container_memory() {
     fi
 }
 
-# Функция для получения общей статистики памяти - УПРОЩЕННАЯ
+# Function to get overall memory statistics - SIMPLIFIED
 get_memory_stats() {
     local total_ram=0
     local available_ram=0
     local used_ram=0
     
-    # Получаем информацию о системе через /proc/meminfo
+    # Get system information via /proc/meminfo
     if [ -f /proc/meminfo ]; then
         total_ram=$(grep MemTotal /proc/meminfo | awk '{print $2}')
         available_ram=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
@@ -211,7 +211,7 @@ get_memory_stats() {
         available_ram=$((available_ram * 1024))  # Convert kB to bytes
         used_ram=$((total_ram - available_ram))
     else
-        # Альтернативный метод через free
+        # Alternative method via free
         local memory_info=$(free -b 2>/dev/null | grep Mem:)
         if [ -n "$memory_info" ]; then
             total_ram=$(echo "$memory_info" | awk '{print $2}')
@@ -223,11 +223,11 @@ get_memory_stats() {
     echo "$total_ram $available_ram $used_ram"
 }
 
-# Функция для получения общего использования памяти контейнерами - ПРОСТАЯ
+# Function to get total container memory usage - SIMPLE
 get_total_containers_memory() {
     local total_memory_bytes=0
     
-    # Получаем только запущенные контейнеры и суммируем их память
+    # Get only running containers and sum their memory
     while IFS=$'\t' read -r container mem_usage; do
         if [ -n "$container" ] && [ "$container" != "CONTAINER" ]; then
             local mem_bytes=$(size_to_bytes "$mem_usage")
@@ -238,19 +238,19 @@ get_total_containers_memory() {
     echo "$total_memory_bytes"
 }
 
-# Функция для безопасного вычисления с bc
+# Function for safe calculation with bc
 safe_calc() {
     local expression=$1
     if command -v bc >/dev/null 2>&1; then
         echo "$expression" | bc 2>/dev/null || echo "0"
     else
-        # Простая замена если bc не установлен
+        # Simple replacement if bc is not installed
         local result=$(echo "$expression" | sed 's/\.//g' | awk '{print int($1)}')
         echo "${result:-0}"
     fi
 }
 
-# Функция для проверки подтверждения с поддержкой русской раскладки
+# Function to check confirmation with Russian layout support
 check_confirmation() {
     local confirm="$1"
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || [ "$confirm" = "д" ] || [ "$confirm" = "Д" ]; then
@@ -260,7 +260,7 @@ check_confirmation() {
     fi
 }
 
-# Функция для проверки отмены с поддержкой русской раскладки
+# Function to check cancellation with Russian layout support
 check_cancel() {
     local input="$1"
     if [[ "$input" == "c" || "$input" == "C" || "$input" == "с" || "$input" == "С" ]]; then
@@ -270,13 +270,13 @@ check_cancel() {
     fi
 }
 
-# Функция для отображения статистики диска (для образов)
+# Function to display disk statistics (for images)
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 📦 ОБРАЗЫ DOCKER                        📊 СТАТИСТИКА СИСТЕМЫ                   ║${NC}"
+    echo -e "${CYAN}║ 📦 DOCKER IMAGES                        📊 SYSTEM STATISTICS                    ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
-    # Получаем статистику диска
+    # Get disk statistics
     local disk_info=$(df / | tail -1 2>/dev/null)
     if [ -n "$disk_info" ]; then
         local disk_total=$(echo "$disk_info" | awk '{print $2}')
@@ -286,7 +286,7 @@ show_disk_stats() {
         local disk_used_bytes=$((disk_used * 1024))
         local disk_available_bytes=$((disk_available * 1024))
         
-        # Получаем общий размер образов
+        # Get total images size
         local total_images_bytes=0
         while IFS='|' read -r id repository tag size created; do
             if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
@@ -300,31 +300,31 @@ show_disk_stats() {
             images_percent=$(safe_calc "scale=1; $total_images_bytes * 100 / $disk_total_bytes")
         fi
         
-        echo -e "${CYAN}║ ${GREEN}• Образы:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Диск:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Свободно:${NC} $(format_bytes $disk_available_bytes) ║"
-        echo -e "${CYAN}║ ${GREEN}• Занято образами:${NC} ${images_percent}% ${CYAN}• Всего образов:${NC} $(docker images -q | wc -l)                                  ║"
+        echo -e "${CYAN}║ ${GREEN}• Images:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Disk:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Free:${NC} $(format_bytes $disk_available_bytes) ║"
+        echo -e "${CYAN}║ ${GREEN}• Used by images:${NC} ${images_percent}% ${CYAN}• Total images:${NC} $(docker images -q | wc -l)                                  ║"
     else
-        echo -e "${CYAN}║ ${RED}Не удалось получить информацию о диске${NC}                                                          ║"
+        echo -e "${CYAN}║ ${RED}Failed to get disk information${NC}                                                          ║"
     fi
     
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
-# Функция для отображения статистики контейнеров - УПРОЩЕННАЯ
+# Function to display container statistics - SIMPLIFIED
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 🐳 КОНТЕЙНЕРЫ DOCKER                     📊 СТАТИСТИКА СИСТЕМЫ                   ║${NC}"
+    echo -e "${CYAN}║ 🐳 DOCKER CONTAINERS                   📊 SYSTEM STATISTICS                    ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
-    # Получаем общую информацию о контейнерах
+    # Get general container information
     local total_containers=$(docker ps -aq 2>/dev/null | wc -l)
     local running_containers=$(docker ps -q 2>/dev/null | wc -l)
     local stopped_containers=$((total_containers - running_containers))
     
-    # Получаем общее использование памяти контейнерами
+    # Get total container memory usage
     local total_memory_bytes=$(get_total_containers_memory)
     
-    # Получаем общую статистику памяти системы
+    # Get overall system memory statistics
     read -r total_ram available_ram used_ram <<< "$(get_memory_stats)"
     
     local containers_ram_percent=0
@@ -332,23 +332,23 @@ show_containers_stats() {
         containers_ram_percent=$(safe_calc "scale=1; $total_memory_bytes * 100 / $total_ram")
     fi
     
-    # Форматируем размеры для отображения
+    # Format sizes for display
     local total_ram_display=$(format_bytes $total_ram)
     local available_ram_display=$(format_bytes $available_ram)
     
-    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $(format_bytes $total_memory_bytes) ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Всего:${NC} $total_containers ${CYAN}• Запущено:${NC} $running_containers ║"
-    echo -e "${CYAN}║ ${GREEN}• Остановлено:${NC} $stopped_containers ${CYAN}• Всего RAM:${NC} $total_ram_display ${CYAN}• Свободно:${NC} $available_ram_display                          ║"
+    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $(format_bytes $total_memory_bytes) ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Total:${NC} $total_containers ${CYAN}• Running:${NC} $running_containers ║"
+    echo -e "${CYAN}║ ${GREEN}• Stopped:${NC} $stopped_containers ${CYAN}• Total RAM:${NC} $total_ram_display ${CYAN}• Free:${NC} $available_ram_display                          ║"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
-# Функция для отображения заголовка
+# Function to display header
 print_header() {
     clear
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════╗"
     echo "║           Simple Linux Docker Manager            ║"
-    echo "║         УПРАВЛЕНИЕ ОБРАЗАМИ И КОНТЕЙНЕРАМИ       ║"
+    echo "║           IMAGE AND CONTAINER MANAGEMENT         ║"
     echo "║          https://github.com/rjohny55/            ║"
     echo "║           Simple-Linux-Docker-Manager            ║"
     echo "╚══════════════════════════════════════════════════╝"
@@ -356,21 +356,21 @@ print_header() {
     echo ""
 }
 
-# Функция для ожидания нажатия Enter
+# Function to wait for Enter key press
 press_enter_to_continue() {
     echo ""
-    echo -e "${CYAN}Нажмите Enter для продолжения...${NC}"
+    echo -e "${CYAN}Press Enter to continue...${NC}"
     safe_read "" dummy_input
 }
 
-# Функция для показа всех образов с датой создания и пагинацией
+# Function to show all images with creation date and pagination
 show_images() {
     local page=${1:-1}
     local page_size=50
     local start_index=$(( (page - 1) * page_size + 1 ))
     local end_index=$(( page * page_size ))
     
-    echo -e "${YELLOW}📦 Список Docker образов (Страница $page):${NC}"
+    echo -e "${YELLOW}📦 Docker images list (Page $page):${NC}"
     echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════${NC}"
     
     local counter=1
@@ -379,20 +379,20 @@ show_images() {
     declare -g image_names=()
     declare -g image_tags=()
     
-    # Получаем все образы
+    # Get all images
     local all_images=$(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
     local total_images=$(echo "$all_images" | wc -l)
     local total_pages=$(( (total_images + page_size - 1) / page_size ))
 
     while IFS='|' read -r id repository tag size created; do
         if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-            # Пагинация: показываем только элементы для текущей страницы
+            # Pagination: show only items for current page
             if [ $counter -ge $start_index ] && [ $counter -le $end_index ]; then
                 image_ids[$display_counter]=$id
                 image_names[$display_counter]="$repository"
                 image_tags[$display_counter]="$tag"
                 
-                # Форматируем дату (оставляем только дату, убираем время)
+                # Format date (keep only date, remove time)
                 short_created=$(echo "$created" | cut -d' ' -f1)
                 printf "${GREEN}%2d.${NC} ${PURPLE}%-30s${NC} ${YELLOW}%-25s${NC} ${RED}%-10s${NC} ${ORANGE}%s${NC}\n" \
                     "$display_counter" "${repository:0:30}" "${tag:0:25}" "$size" "$short_created"
@@ -405,20 +405,20 @@ show_images() {
     
     echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════${NC}"
     
-    # Отображаем навигацию по страницам если нужно
+    # Display page navigation if needed
     if [ $total_pages -gt 1 ]; then
-        echo -e "${CYAN}📄 Страница ${YELLOW}$page${CYAN} из ${YELLOW}$total_pages${CYAN}. Всего образов: ${YELLOW}$total_images${NC}"
-        echo -e "${CYAN}🔍 Используйте навигацию в меню для перехода между страницами${NC}"
+        echo -e "${CYAN}📄 Page ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Total images: ${YELLOW}$total_images${NC}"
+        echo -e "${CYAN}🔍 Use menu navigation to switch between pages${NC}"
     fi
     
     echo ""
     
     if [ $display_counter -eq 0 ]; then
-        echo -e "${RED}📭 Нет Docker образов.${NC}"
+        echo -e "${RED}📭 No Docker images.${NC}"
         return 1
     fi
     
-    # Сохраняем информацию о пагинации для использования в меню
+    # Save pagination information for use in menu
     IMAGES_CURRENT_PAGE=$page
     IMAGES_TOTAL_PAGES=$total_pages
     IMAGES_TOTAL_ITEMS=$total_images
@@ -426,14 +426,14 @@ show_images() {
     return 0
 }
 
-# Функция для показа всех контейнеров с пагинацией - УПРОЩЕННАЯ
+# Function to show all containers with pagination - SIMPLIFIED
 show_containers() {
     local page=${1:-1}
     local page_size=50
     local start_index=$(( (page - 1) * page_size + 1 ))
     local end_index=$(( page * page_size ))
     
-    echo -e "${YELLOW}🐳 Список Docker контейнеров (Страница $page):${NC}"
+    echo -e "${YELLOW}🐳 Docker containers list (Page $page):${NC}"
     echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════${NC}"
     
     local counter=1
@@ -442,29 +442,29 @@ show_containers() {
     declare -g container_names=()
     declare -g container_status=()
     
-    # Получаем общее количество контейнеров для пагинации
+    # Get total container count for pagination
     local all_containers=$(docker ps -a --format "table {{.ID}}|{{.Image}}|{{.Status}}|{{.Names}}" | tail -n +2)
     local total_containers=$(echo "$all_containers" | wc -l)
     local total_pages=$(( (total_containers + page_size - 1) / page_size ))
     
-    # Заголовок таблицы
+    # Table header
     printf "${GREEN}%-3s${NC} ${PURPLE}%-15s${NC} ${CYAN}%-25s${NC} ${BLUE}%-20s${NC} ${YELLOW}%-18s${NC} ${RED}%-12s${NC}\n" \
         "№" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
     echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     
     while IFS='|' read -r id image status names; do
         if [ -n "$id" ] && [ "$id" != "CONTAINER ID" ]; then
-            # Пагинация: показываем только элементы для текущей страницы
+            # Pagination: show only items for current page
             if [ $counter -ge $start_index ] && [ $counter -le $end_index ]; then
                 container_ids[$display_counter]=$id
                 container_names[$display_counter]="$names"
                 container_status[$display_counter]="$status"
                 
-                # Получаем IP и память для контейнера
+                # Get container IP and memory
                 local ip=$(get_container_ip "$id")
                 local memory=$(get_container_memory "$id" "$status")
                 
-                # Определяем цвет статуса
+                # Determine status color
                 status_color=$GREEN
                 if [[ "$status" == *"Exited"* ]] || [[ "$status" == *"Dead"* ]]; then
                     status_color=$RED
@@ -485,20 +485,20 @@ show_containers() {
     
     echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════${NC}"
     
-    # Отображаем навигацию по страницам если нужно
+    # Display page navigation if needed
     if [ $total_pages -gt 1 ]; then
-        echo -e "${CYAN}📄 Страница ${YELLOW}$page${CYAN} из ${YELLOW}$total_pages${CYAN}. Всего контейнеров: ${YELLOW}$total_containers${NC}"
-        echo -e "${CYAN}🔍 Используйте навигацию в меню для перехода между страницами${NC}"
+        echo -e "${CYAN}📄 Page ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Total containers: ${YELLOW}$total_containers${NC}"
+        echo -e "${CYAN}🔍 Use menu navigation to switch between pages${NC}"
     fi
     
     echo ""
     
     if [ $display_counter -eq 0 ]; then
-        echo -e "${RED}📭 Нет Docker контейнеров.${NC}"
+        echo -e "${RED}📭 No Docker containers.${NC}"
         return 1
     fi
     
-    # Сохраняем информацию о пагинации для использования в меню
+    # Save pagination information for use in menu
     CONTAINERS_CURRENT_PAGE=$page
     CONTAINERS_TOTAL_PAGES=$total_pages
     CONTAINERS_TOTAL_ITEMS=$total_containers
@@ -506,30 +506,30 @@ show_containers() {
     return 0
 }
 
-# Функция для обновления выбранного образа - НОВАЯ ФУНКЦИЯ
+# Function to update selected image - NEW FUNCTION
 update_selected_image() {
-    echo -e "${YELLOW}🔄 Обновление образа из репозитория${NC}"
-    echo -e "${CYAN}Введите номер образа для обновления:${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}🔄 Updating image from repository${NC}"
+    echo -e "${CYAN}Enter image number to update:${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 10; then
         return 1
     fi
     
-    # Проверка на отмену
+    # Check for cancellation
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Проверка на число
+    # Check if number
     if ! [[ "$input" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED}❌ Неверный номер. Введите число.${NC}"
+        echo -e "${RED}❌ Invalid number. Enter a number.${NC}"
         return 1
     fi
     
     if [ -z "${image_ids[$input]}" ]; then
-        echo -e "${RED}❌ Неверный номер образа.${NC}"
+        echo -e "${RED}❌ Invalid image number.${NC}"
         return 1
     fi
     
@@ -537,55 +537,55 @@ update_selected_image() {
     local image_tag="${image_tags[$input]}"
     local full_image_name="$image_name:$image_tag"
     
-    # Проверяем, что образ имеет репозиторий (не <none>)
+    # Check that image has repository (not <none>)
     if [ "$image_name" = "<none>" ] || [ "$image_tag" = "<none>" ]; then
-        echo -e "${RED}❌ Нельзя обновить образ без репозитория.${NC}"
+        echo -e "${RED}❌ Cannot update image without repository.${NC}"
         return 1
     fi
     
     echo ""
-    echo -e "${YELLOW}🔄 Обновляем образ: ${CYAN}$full_image_name${NC}"
+    echo -e "${YELLOW}🔄 Updating image: ${CYAN}$full_image_name${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     
-    # Выполняем обновление образа
+    # Perform image update
     if docker pull "$full_image_name"; then
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${GREEN}✅ Образ успешно обновлен${NC}"
+        echo -e "${GREEN}✅ Image successfully updated${NC}"
         
-        # Показываем информацию о новом образе
+        # Show information about new image
         echo ""
-        echo -e "${CYAN}📊 Информация об обновленном образе:${NC}"
+        echo -e "${CYAN}📊 Updated image information:${NC}"
         docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" | grep "$image_name" | head -1
     else
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${RED}❌ Ошибка при обновлении образа${NC}"
+        echo -e "${RED}❌ Error updating image${NC}"
     fi
 }
 
-# Функция для пуша выбранного образа - НОВАЯ ФУНКЦИЯ
+# Function to push selected image - NEW FUNCTION
 push_selected_image() {
-    echo -e "${YELLOW}📤 Пуш образа в репозиторий${NC}"
-    echo -e "${CYAN}Введите номер образа для пуша:${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}📤 Pushing image to repository${NC}"
+    echo -e "${CYAN}Enter image number to push:${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 10; then
         return 1
     fi
     
-    # Проверка на отмену
+    # Check for cancellation
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Проверка на число
+    # Check if number
     if ! [[ "$input" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED}❌ Неверный номер. Введите число.${NC}"
+        echo -e "${RED}❌ Invalid number. Enter a number.${NC}"
         return 1
     fi
     
     if [ -z "${image_ids[$input]}" ]; then
-        echo -e "${RED}❌ Неверный номер образа.${NC}"
+        echo -e "${RED}❌ Invalid image number.${NC}"
         return 1
     fi
     
@@ -593,172 +593,172 @@ push_selected_image() {
     local image_tag="${image_tags[$input]}"
     local full_image_name="$image_name:$image_tag"
     
-    # Проверяем, что образ имеет репозиторий (не <none>)
+    # Check that image has repository (not <none>)
     if [ "$image_name" = "<none>" ] || [ "$image_tag" = "<none>" ]; then
-        echo -e "${RED}❌ Нельзя запушить образ без репозитория.${NC}"
+        echo -e "${RED}❌ Cannot push image without repository.${NC}"
         return 1
     fi
     
     echo ""
-    echo -e "${YELLOW}📤 Готовимся к пушу образа: ${CYAN}$full_image_name${NC}"
+    echo -e "${YELLOW}📤 Preparing to push image: ${CYAN}$full_image_name${NC}"
     echo ""
     
-    # Запрос учетных данных
-    echo -e "${YELLOW}🔐 Введите учетные данные для Docker registry:${NC}"
-    echo -e "${CYAN}Логин:${NC}"
+    # Request credentials
+    echo -e "${YELLOW}🔐 Enter Docker registry credentials:${NC}"
+    echo -e "${CYAN}Username:${NC}"
     if ! safe_read "> " docker_username 50; then
         return 1
     fi
     
-    echo -e "${CYAN}Пароль:${NC}"
+    echo -e "${CYAN}Password:${NC}"
     if ! safe_read -s "> " docker_password 50; then
         return 1
     fi
     
     echo ""
-    echo -e "${YELLOW}🔐 Авторизуемся в Docker registry...${NC}"
+    echo -e "${YELLOW}🔐 Authenticating to Docker registry...${NC}"
     
-    # Авторизация в Docker registry
+    # Authenticate to Docker registry
     if echo "$docker_password" | docker login --username "$docker_username" --password-stdin; then
-        echo -e "${GREEN}✅ Успешная авторизация${NC}"
+        echo -e "${GREEN}✅ Authentication successful${NC}"
     else
-        echo -e "${RED}❌ Ошибка авторизации${NC}"
+        echo -e "${RED}❌ Authentication error${NC}"
         return 1
     fi
     
     echo ""
-    echo -e "${YELLOW}📤 Пушим образ: ${CYAN}$full_image_name${NC}"
+    echo -e "${YELLOW}📤 Pushing image: ${CYAN}$full_image_name${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     
-    # Выполняем пуш образа
+    # Perform image push
     if docker push "$full_image_name"; then
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${GREEN}✅ Образ успешно запушен${NC}"
+        echo -e "${GREEN}✅ Image successfully pushed${NC}"
         
-        # Выходим из учетной записи для безопасности
+        # Logout for security
         docker logout
-        echo -e "${YELLOW}🔒 Выполнен выход из учетной записи${NC}"
+        echo -e "${YELLOW}🔒 Logged out from account${NC}"
     else
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${RED}❌ Ошибка при пуше образа${NC}"
+        echo -e "${RED}❌ Error pushing image${NC}"
         
-        # Все равно выходим из учетной записи
+        # Logout anyway
         docker logout
-        echo -e "${YELLOW}🔒 Выполнен выход из учетной записи${NC}"
+        echo -e "${YELLOW}🔒 Logged out from account${NC}"
     fi
 }
 
-# Обновленное меню операций с образами с новыми функциями
+# Updated images operations menu with new functions
 show_images_menu() {
-    echo -e "${CYAN}🛠️  Операции с образами:${NC}"
+    echo -e "${CYAN}🛠️  Image operations:${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}1. 🗑️  Удалить выбранные образы${NC}"
-    echo -e "${YELLOW}2. 🧹  Удалить неиспользуемые образы${NC}"
-    echo -e "${RED}3. 💥  Удалить ВСЕ образы${NC}"
-    echo -e "${ORANGE}4. 🔍  Удалить образы с тегом <none>${NC}"
-    echo -e "${PURPLE}5. 🛠️  Удалить кеш сборок Docker${NC}"
-    echo -e "${BLUE}6. 🔄  Обновить список образов${NC}"
-    echo -e "${CYAN}7. 🔄  Обновить выбранный образ (pull)${NC}"
-    echo -e "${GREEN}8. 📤  Запушить выбранный образ (push)${NC}"
+    echo -e "${GREEN}1. 🗑️  Delete selected images${NC}"
+    echo -e "${YELLOW}2. 🧹  Delete unused images${NC}"
+    echo -e "${RED}3. 💥  Delete ALL images${NC}"
+    echo -e "${ORANGE}4. 🔍  Delete images with <none> tag${NC}"
+    echo -e "${PURPLE}5. 🛠️  Delete Docker build cache${NC}"
+    echo -e "${BLUE}6. 🔄  Refresh images list${NC}"
+    echo -e "${CYAN}7. 🔄  Update selected image (pull)${NC}"
+    echo -e "${GREEN}8. 📤  Push selected image (push)${NC}"
     
-    # Добавляем навигацию по страницам если есть несколько страниц
+    # Add page navigation if there are multiple pages
     if [ "${IMAGES_TOTAL_PAGES:-1}" -gt 1 ]; then
         if [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ]; then
-            echo -e "${CYAN}9. 📄  Следующая страница${NC}"
+            echo -e "${CYAN}9. 📄  Next page${NC}"
         fi
         if [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ]; then
-            echo -e "${CYAN}10. 📄  Предыдущая страница${NC}"
+            echo -e "${CYAN}10. 📄  Previous page${NC}"
         fi
     fi
     
-    echo -e "${GREEN}11. 🐳  Перейти к управлению контейнерами${NC}"
-    echo -e "${GREEN}0. 🏠  Выход в главное меню${NC}"
+    echo -e "${GREEN}11. 🐳  Switch to container management${NC}"
+    echo -e "${GREEN}0. 🏠  Back to main menu${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     
-    # Определяем максимальный допустимый выбор в зависимости от наличия страниц
+    # Determine maximum allowed choice depending on page presence
     local max_choice=11
     if [ "${IMAGES_TOTAL_PAGES:-1}" -gt 1 ]; then
         if [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ] && [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ]; then
-            safe_read "${CYAN}🎯 Выберите операцию [0-11]: ${NC}" choice 2
+            safe_read "${CYAN}🎯 Select operation [0-11]: ${NC}" choice 2
         elif [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ]; then
-            safe_read "${CYAN}🎯 Выберите операцию [0-10,11]: ${NC}" choice 2
+            safe_read "${CYAN}🎯 Select operation [0-10,11]: ${NC}" choice 2
         elif [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ]; then
-            safe_read "${CYAN}🎯 Выберите операцию [0-8,10,11]: ${NC}" choice 2
+            safe_read "${CYAN}🎯 Select operation [0-8,10,11]: ${NC}" choice 2
         else
-            safe_read "${CYAN}🎯 Выберите операцию [0-11]: ${NC}" choice 2
+            safe_read "${CYAN}🎯 Select operation [0-11]: ${NC}" choice 2
         fi
     else
-        safe_read "${CYAN}🎯 Выберите операцию [0-11]: ${NC}" choice 2
+        safe_read "${CYAN}🎯 Select operation [0-11]: ${NC}" choice 2
     fi
 }
 
-# Функция для отображения меню операций с контейнерами с поддержкой пагинации
+# Function to display container operations menu with pagination support
 show_containers_menu() {
-    echo -e "${CYAN}🛠️  Операции с контейнерами:${NC}"
+    echo -e "${CYAN}🛠️  Container operations:${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}1. ⏹️   Остановить выбранные контейнеры${NC}"
-    echo -e "${YELLOW}2. 🗑️   Удалить выбранные контейнеры${NC}"
-    echo -e "${RED}3. 💀   Остановить и удалить выбранные контейнеры${NC}"
-    echo -e "${GREEN}4. ▶️   Запустить выбранные контейнеры${NC}"
-    echo -e "${BLUE}5. 🔄   Обновить список контейнеров${NC}"
+    echo -e "${GREEN}1. ⏹️   Stop selected containers${NC}"
+    echo -e "${YELLOW}2. 🗑️   Delete selected containers${NC}"
+    echo -e "${RED}3. 💀   Stop and delete selected containers${NC}"
+    echo -e "${GREEN}4. ▶️   Start selected containers${NC}"
+    echo -e "${BLUE}5. 🔄   Refresh containers list${NC}"
     
-    # Добавляем навигацию по страницам если есть несколько страниц
+    # Add page navigation if there are multiple pages
     if [ "${CONTAINERS_TOTAL_PAGES:-1}" -gt 1 ]; then
         if [ "${CONTAINERS_CURRENT_PAGE:-1}" -lt "${CONTAINERS_TOTAL_PAGES}" ]; then
-            echo -e "${CYAN}6. 📄  Следующая страница${NC}"
+            echo -e "${CYAN}6. 📄  Next page${NC}"
         fi
         if [ "${CONTAINERS_CURRENT_PAGE:-1}" -gt 1 ]; then
-            echo -e "${CYAN}7. 📄  Предыдущая страница${NC}"
+            echo -e "${CYAN}7. 📄  Previous page${NC}"
         fi
     fi
     
-    echo -e "${GREEN}8. 📦   Перейти к управлению образами${NC}"
-    echo -e "${GREEN}0. 🏠   Выход в главное меню${NC}"
+    echo -e "${GREEN}8. 📦   Switch to image management${NC}"
+    echo -e "${GREEN}0. 🏠   Back to main menu${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     
     local max_choice=8
     if [ "${CONTAINERS_TOTAL_PAGES:-1}" -gt 1 ]; then
         if [ "${CONTAINERS_CURRENT_PAGE:-1}" -lt "${CONTAINERS_TOTAL_PAGES}" ] && [ "${CONTAINERS_CURRENT_PAGE:-1}" -gt 1 ]; then
-            safe_read "${CYAN}🎯 Выберите операцию [0-8]: ${NC}" choice 1
+            safe_read "${CYAN}🎯 Select operation [0-8]: ${NC}" choice 1
         elif [ "${CONTAINERS_CURRENT_PAGE:-1}" -lt "${CONTAINERS_TOTAL_PAGES}" ]; then
-            safe_read "${CYAN}🎯 Выберите операцию [0-6,8,0]: ${NC}" choice 1
+            safe_read "${CYAN}🎯 Select operation [0-6,8,0]: ${NC}" choice 1
         elif [ "${CONTAINERS_CURRENT_PAGE:-1}" -gt 1 ]; then
-            safe_read "${CYAN}🎯 Выберите операцию [0-5,7,8,0]: ${NC}" choice 1
+            safe_read "${CYAN}🎯 Select operation [0-5,7,8,0]: ${NC}" choice 1
         else
-            safe_read "${CYAN}🎯 Выберите операцию [0-8]: ${NC}" choice 1
+            safe_read "${CYAN}🎯 Select operation [0-8]: ${NC}" choice 1
         fi
     else
-        safe_read "${CYAN}🎯 Выберите операцию [0-8]: ${NC}" choice 1
+        safe_read "${CYAN}🎯 Select operation [0-8]: ${NC}" choice 1
     fi
 }
 
-# Функция для удаления выбранных образов
+# Function to delete selected images
 delete_selected_images() {
-    echo -e "${YELLOW}🗑️ Введите номера образов для удаления (через пробел):${NC}"
-    echo -e "${CYAN}Пример: 1 3 5${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}🗑️ Enter image numbers to delete (space separated):${NC}"
+    echo -e "${CYAN}Example: 1 3 5${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 50; then
         return 1
     fi
     
-    # Проверка на отмену с поддержкой русской раскладки
+    # Check for cancellation with Russian layout support
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Проверка на пустой ввод
+    # Check for empty input
     if [ -z "$input" ]; then
-        echo -e "${RED}❌ Не выбрано ни одного образа.${NC}"
+        echo -e "${RED}❌ No images selected.${NC}"
         return 1
     fi
     
-    # Преобразуем ввод в массив
+    # Convert input to array
     read -a selected_numbers <<< "$input"
     
     echo ""
-    echo -e "${YELLOW}🗑️ Будут удалены следующие образы:${NC}"
+    echo -e "${YELLOW}🗑️ The following images will be deleted:${NC}"
     for num in "${selected_numbers[@]}"; do
         if [ -n "${image_ids[$num]}" ]; then
             echo -e "  ${RED}×${NC} ${image_names[$num]}:${image_tags[$num]}"
@@ -766,51 +766,51 @@ delete_selected_images() {
     done
     
     echo ""
-    safe_read "Вы уверены? (y/N): " confirm 1
+    safe_read "Are you sure? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
         for num in "${selected_numbers[@]}"; do
             if [ -n "${image_ids[$num]}" ]; then
-                echo -e "${YELLOW}🗑️ Удаляем ${image_names[$num]}:${image_tags[$num]}...${NC}"
+                echo -e "${YELLOW}🗑️ Deleting ${image_names[$num]}:${image_tags[$num]}...${NC}"
                 if docker rmi -f "${image_ids[$num]}" 2>/dev/null; then
-                    echo -e "${GREEN}✅ Успешно удален${NC}"
+                    echo -e "${GREEN}✅ Successfully deleted${NC}"
                 else
-                    echo -e "${RED}❌ Ошибка при удалении${NC}"
+                    echo -e "${RED}❌ Error deleting${NC}"
                 fi
                 echo ""
             else
-                echo -e "${RED}❌ Неверный номер: $num${NC}"
+                echo -e "${RED}❌ Invalid number: $num${NC}"
             fi
         done
         return 0
     else
-        echo -e "${GREEN}✅ Отмена удаления.${NC}"
+        echo -e "${GREEN}✅ Deletion cancelled.${NC}"
         return 1
     fi
 }
 
-# Функция для остановки выбранных контейнеров
+# Function to stop selected containers
 stop_selected_containers() {
-    echo -e "${YELLOW}⏹️ Введите номера контейнеров для остановки (через пробел):${NC}"
-    echo -e "${CYAN}Пример: 1 3 5${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}⏹️ Enter container numbers to stop (space separated):${NC}"
+    echo -e "${CYAN}Example: 1 3 5${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 50; then
         return 1
     fi
     
-    # Проверка на отмену с поддержкой русской раскладки
+    # Check for cancellation with Russian layout support
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Преобразуем ввод в массив
+    # Convert input to array
     read -a selected_numbers <<< "$input"
     
     echo ""
-    echo -e "${YELLOW}⏹️ Будут остановлены следующие контейнеры:${NC}"
+    echo -e "${YELLOW}⏹️ The following containers will be stopped:${NC}"
     for num in "${selected_numbers[@]}"; do
         if [ -n "${container_ids[$num]}" ]; then
             echo -e "  ${RED}■${NC} ${container_names[$num]} (${container_status[$num]})"
@@ -818,51 +818,51 @@ stop_selected_containers() {
     done
     
     echo ""
-    safe_read "Вы уверены? (y/N): " confirm 1
+    safe_read "Are you sure? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
         for num in "${selected_numbers[@]}"; do
             if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}⏹️ Останавливаем ${container_names[$num]}...${NC}"
+                echo -e "${YELLOW}⏹️ Stopping ${container_names[$num]}...${NC}"
                 if docker stop "${container_ids[$num]}" 2>/dev/null; then
-                    echo -e "${GREEN}✅ Успешно остановлен${NC}"
+                    echo -e "${GREEN}✅ Successfully stopped${NC}"
                 else
-                    echo -e "${RED}❌ Ошибка при остановке${NC}"
+                    echo -e "${RED}❌ Error stopping${NC}"
                 fi
                 echo ""
             else
-                echo -e "${RED}❌ Неверный номер: $num${NC}"
+                echo -e "${RED}❌ Invalid number: $num${NC}"
             fi
         done
         return 0
     else
-        echo -e "${GREEN}✅ Отмена остановки.${NC}"
+        echo -e "${GREEN}✅ Stop cancelled.${NC}"
         return 1
     fi
 }
 
-# Функция для запуска выбранных контейнеров
+# Function to start selected containers
 start_selected_containers() {
-    echo -e "${YELLOW}▶️  Введите номера контейнеров для запуска (через пробел):${NC}"
-    echo -e "${CYAN}Пример: 1 3 5${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}▶️  Enter container numbers to start (space separated):${NC}"
+    echo -e "${CYAN}Example: 1 3 5${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 50; then
         return 1
     fi
     
-    # Проверка на отмену с поддержкой русской раскладки
+    # Check for cancellation with Russian layout support
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Преобразуем ввод в массив
+    # Convert input to array
     read -a selected_numbers <<< "$input"
     
     echo ""
-    echo -e "${YELLOW}▶️  Будут запущены следующие контейнеры:${NC}"
+    echo -e "${YELLOW}▶️  The following containers will be started:${NC}"
     for num in "${selected_numbers[@]}"; do
         if [ -n "${container_ids[$num]}" ]; then
             echo -e "  ${GREEN}▶${NC} ${container_names[$num]} (${container_status[$num]})"
@@ -870,51 +870,51 @@ start_selected_containers() {
     done
     
     echo ""
-    safe_read "Вы уверены? (y/N): " confirm 1
+    safe_read "Are you sure? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
         for num in "${selected_numbers[@]}"; do
             if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}▶️  Запускаем ${container_names[$num]}...${NC}"
+                echo -e "${YELLOW}▶️  Starting ${container_names[$num]}...${NC}"
                 if docker start "${container_ids[$num]}" 2>/dev/null; then
-                    echo -e "${GREEN}✅ Успешно запущен${NC}"
+                    echo -e "${GREEN}✅ Successfully started${NC}"
                 else
-                    echo -e "${RED}❌ Ошибка при запуске${NC}"
+                    echo -e "${RED}❌ Error starting${NC}"
                 fi
                 echo ""
             else
-                echo -e "${RED}❌ Неверный номер: $num${NC}"
+                echo -e "${RED}❌ Invalid number: $num${NC}"
             fi
         done
         return 0
     else
-        echo -e "${GREEN}✅ Отмена запуска.${NC}"
+        echo -e "${GREEN}✅ Start cancelled.${NC}"
         return 1
     fi
 }
 
-# Функция для удаления выбранных контейнеров
+# Function to delete selected containers
 delete_selected_containers() {
-    echo -e "${YELLOW}🗑️ Введите номера контейнеров для удаления (через пробел):${NC}"
-    echo -e "${CYAN}Пример: 1 3 5${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}🗑️ Enter container numbers to delete (space separated):${NC}"
+    echo -e "${CYAN}Example: 1 3 5${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 50; then
         return 1
     fi
     
-    # Проверка на отмену с поддержкой русской раскладки
+    # Check for cancellation with Russian layout support
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Преобразуем ввод в массив
+    # Convert input to array
     read -a selected_numbers <<< "$input"
     
     echo ""
-    echo -e "${YELLOW}🗑️ Будут удалены следующие контейнеры:${NC}"
+    echo -e "${YELLOW}🗑️ The following containers will be deleted:${NC}"
     for num in "${selected_numbers[@]}"; do
         if [ -n "${container_ids[$num]}" ]; then
             echo -e "  ${RED}×${NC} ${container_names[$num]} (${container_status[$num]})"
@@ -922,51 +922,51 @@ delete_selected_containers() {
     done
     
     echo ""
-    safe_read "Вы уверены? (y/N): " confirm 1
+    safe_read "Are you sure? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
         for num in "${selected_numbers[@]}"; do
             if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}🗑️ Удаляем ${container_names[$num]}...${NC}"
+                echo -e "${YELLOW}🗑️ Deleting ${container_names[$num]}...${NC}"
                 if docker rm "${container_ids[$num]}" 2>/dev/null; then
-                    echo -e "${GREEN}✅ Успешно удален${NC}"
+                    echo -e "${GREEN}✅ Successfully deleted${NC}"
                 else
-                    echo -e "${RED}❌ Ошибка при удалении${NC}"
+                    echo -e "${RED}❌ Error deleting${NC}"
                 fi
                 echo ""
             else
-                echo -e "${RED}❌ Неверный номер: $num${NC}"
+                echo -e "${RED}❌ Invalid number: $num${NC}"
             fi
         done
         return 0
     else
-        echo -e "${GREEN}✅ Отмена удаления.${NC}"
+        echo -e "${GREEN}✅ Deletion cancelled.${NC}"
         return 1
     fi
 }
 
-# Функция для остановки и удаления выбранных контейнеров
+# Function to stop and delete selected containers
 stop_and_delete_containers() {
-    echo -e "${YELLOW}💀 Введите номера контейнеров для остановки и удаления (через пробел):${NC}"
-    echo -e "${CYAN}Пример: 1 3 5${NC}"
-    echo -e "${ORANGE}Или введите 'c' для отмены${NC}"
+    echo -e "${YELLOW}💀 Enter container numbers to stop and delete (space separated):${NC}"
+    echo -e "${CYAN}Example: 1 3 5${NC}"
+    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
     
     if ! safe_read "> " input 50; then
         return 1
     fi
     
-    # Проверка на отмену с поддержкой русской раскладки
+    # Check for cancellation with Russian layout support
     if check_cancel "$input"; then
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
     
-    # Преобразуем ввод в массив
+    # Convert input to array
     read -a selected_numbers <<< "$input"
     
     echo ""
-    echo -e "${RED}💀 Будут остановлены и удалены следующие контейнеры:${NC}"
+    echo -e "${RED}💀 The following containers will be stopped and deleted:${NC}"
     for num in "${selected_numbers[@]}"; do
         if [ -n "${container_ids[$num]}" ]; then
             echo -e "  ${RED}☠${NC} ${container_names[$num]} (${container_status[$num]})"
@@ -974,150 +974,150 @@ stop_and_delete_containers() {
     done
     
     echo ""
-    safe_read "Вы уверены? (y/N): " confirm 1
+    safe_read "Are you sure? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
         for num in "${selected_numbers[@]}"; do
             if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}💀 Останавливаем и удаляем ${container_names[$num]}...${NC}"
+                echo -e "${YELLOW}💀 Stopping and deleting ${container_names[$num]}...${NC}"
                 
-                # Останавливаем контейнер (если он запущен)
+                # Stop container (if running)
                 docker stop "${container_ids[$num]}" 2>/dev/null
                 
-                # Удаляем контейнер
+                # Delete container
                 if docker rm "${container_ids[$num]}" 2>/dev/null; then
-                    echo -e "${GREEN}✅ Успешно остановлен и удален${NC}"
+                    echo -e "${GREEN}✅ Successfully stopped and deleted${NC}"
                 else
-                    echo -e "${RED}❌ Ошибка при остановке/удалении${NC}"
+                    echo -e "${RED}❌ Error stopping/deleting${NC}"
                 fi
                 echo ""
             else
-                echo -e "${RED}❌ Неверный номер: $num${NC}"
+                echo -e "${RED}❌ Invalid number: $num${NC}"
             fi
         done
         return 0
     else
-        echo -e "${GREEN}✅ Отмена операции.${NC}"
+        echo -e "${GREEN}✅ Operation cancelled.${NC}"
         return 1
     fi
 }
 
-# Функция для удаления неиспользуемых образов
+# Function to delete unused images
 delete_unused_images() {
-    echo -e "${YELLOW}🧹 Удаляем неиспользуемые образы...${NC}"
+    echo -e "${YELLOW}🧹 Deleting unused images...${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     if docker image prune -a -f; then
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${GREEN}✅ Готово!${NC}"
+        echo -e "${GREEN}✅ Done!${NC}"
     else
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${RED}❌ Ошибка при удалении неиспользуемых образов${NC}"
+        echo -e "${RED}❌ Error deleting unused images${NC}"
     fi
 }
 
-# Функция для удаления всех образов
+# Function to delete all images
 delete_all_images() {
     echo -e "${RED}╔════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║           ⚠️ ОПАСНАЯ ОПЕРАЦИЯ ⚠️       ║${NC}"
+    echo -e "${RED}║           ⚠️ DANGEROUS OPERATION ⚠️       ║${NC}"
     echo -e "${RED}╚════════════════════════════════════════╝${NC}"
-    echo -e "${RED}🚨 Будут удалены ВСЕ Docker образы!${NC}"
+    echo -e "${RED}🚨 ALL Docker images will be deleted!${NC}"
     echo ""
     
-    safe_read "Вы уверены? (введите 'DELETE' для подтверждения): " confirm 10
+    safe_read "Are you sure? (enter 'DELETE' to confirm): " confirm 10
     
     if [ "$confirm" = "DELETE" ]; then
-        echo -e "${RED}🗑️ Удаляем все образы...${NC}"
+        echo -e "${RED}🗑️ Deleting all images...${NC}"
         all_images=$(docker images -q)
         if [ -n "$all_images" ]; then
             if docker rmi -f $all_images 2>/dev/null; then
-                echo -e "${GREEN}✅ Все образы удалены.${NC}"
+                echo -e "${GREEN}✅ All images deleted.${NC}"
             else
-                echo -e "${RED}❌ Ошибка при удалении некоторых образов${NC}"
+                echo -e "${RED}❌ Error deleting some images${NC}"
             fi
         else
-            echo -e "${YELLOW}📭 Нет образов для удаления.${NC}"
+            echo -e "${YELLOW}📭 No images to delete.${NC}"
         fi
     else
-        echo -e "${GREEN}✅ Отмена удаления.${NC}"
+        echo -e "${GREEN}✅ Deletion cancelled.${NC}"
     fi
 }
 
-# Функция для удаления образов с тегом <none> - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# Function to delete images with <none> tag - FIXED VERSION
 delete_none_images() {
-    echo -e "${YELLOW}🔍 Поиск образов с тегом <none>...${NC}"
+    echo -e "${YELLOW}🔍 Searching for images with <none> tag...${NC}"
     
-    # Получаем ID всех dangling образов (образы с тегом <none>)
+    # Get IDs of all dangling images (images with <none> tag)
     dangling_images=$(docker images -f "dangling=true" -q)
     
     if [ -z "$dangling_images" ]; then
-        echo -e "${GREEN}✅ Нет образов с тегом <none>.${NC}"
-        # УБИРАЕМ вызов press_enter_to_continue здесь
+        echo -e "${GREEN}✅ No images with <none> tag.${NC}"
+        # REMOVE press_enter_to_continue call here
         return
     fi
     
     echo ""
-    echo -e "${RED}🗑️ Образы с тегом <none> (промежуточные образы):${NC}"
+    echo -e "${RED}🗑️ Images with <none> tag (intermediate images):${NC}"
     echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════${NC}"
     
-    # Показываем информацию о dangling образах
+    # Show information about dangling images
     docker images -f "dangling=true" --format "table {{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
     
     echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════${NC}"
     echo ""
     
-    # Считаем количество образов
+    # Count number of images
     image_count=$(echo "$dangling_images" | wc -l)
-    echo -e "${YELLOW}🗑️ Найдено ${image_count} образов с тегом <none>${NC}"
+    echo -e "${YELLOW}🗑️ Found ${image_count} images with <none> tag${NC}"
     
     echo ""
-    safe_read "Удалить все образы с тегом <none>? (y/N): " confirm 1
+    safe_read "Delete all images with <none> tag? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
-        echo -e "${YELLOW}🧹 Удаляем образы с тегом <none>...${NC}"
+        echo -e "${YELLOW}🧹 Deleting images with <none> tag...${NC}"
         
-        # Удаляем все dangling images (образы с тегом <none>)
+        # Delete all dangling images (images with <none> tag)
         if docker image prune -f; then
-            echo -e "${GREEN}✅ Все образы с тегом <none> удалены${NC}"
+            echo -e "${GREEN}✅ All images with <none> tag deleted${NC}"
         else
-            echo -e "${RED}❌ Ошибка при удалении образов с тегом <none>${NC}"
+            echo -e "${RED}❌ Error deleting images with <none> tag${NC}"
         fi
     else
-        echo -e "${GREEN}✅ Отмена удаления.${NC}"
+        echo -e "${GREEN}✅ Deletion cancelled.${NC}"
     fi
 }
 
-# Функция для удаления кеша сборок Docker
+# Function to delete Docker build cache
 delete_build_cache() {
-    echo -e "${YELLOW}🧹 Удаление кеша сборок Docker...${NC}"
-    echo -e "${RED}⚠️ Внимание: Это освободит место, но может увеличить время следующих сборок.${NC}"
+    echo -e "${YELLOW}🧹 Deleting Docker build cache...${NC}"
+    echo -e "${RED}⚠️ Warning: This will free up space but may increase next build times.${NC}"
     echo ""
     
-    # Показываем текущий размер кеша
+    # Show current cache size
     cache_size=$(docker system df | grep "Build Cache" | awk '{print $4}')
-    echo -e "${CYAN}📊 Текущий размер кеша сборок: ${YELLOW}$cache_size${NC}"
+    echo -e "${CYAN}📊 Current build cache size: ${YELLOW}$cache_size${NC}"
     echo ""
     
-    safe_read "Удалить весь кеш сборок? (y/N): " confirm 1
+    safe_read "Delete all build cache? (y/N): " confirm 1
     
     if check_confirmation "$confirm"; then
         echo ""
-        echo -e "${YELLOW}🧹 Удаляем кеш сборок...${NC}"
+        echo -e "${YELLOW}🧹 Deleting build cache...${NC}"
         echo -e "${BLUE}════════════════════════════════════════${NC}"
         if docker builder prune -f; then
             echo -e "${BLUE}════════════════════════════════════════${NC}"
-            echo -e "${GREEN}✅ Кеш сборок удален.${NC}"
+            echo -e "${GREEN}✅ Build cache deleted.${NC}"
         else
             echo -e "${BLUE}════════════════════════════════════════${NC}"
-            echo -e "${RED}❌ Ошибка при удалении кеша сборок${NC}"
+            echo -e "${RED}❌ Error deleting build cache${NC}"
         fi
     else
-        echo -e "${GREEN}✅ Отмена удаления.${NC}"
+        echo -e "${GREEN}✅ Deletion cancelled.${NC}"
     fi
 }
 
-# Главное меню для работы с образами с поддержкой пагинации и новыми функциями
+# Main menu for image management with pagination and new functions
 images_submenu() {
     local current_page=${1:-1}
     
@@ -1125,10 +1125,10 @@ images_submenu() {
         print_header
         show_disk_stats
         if show_images "$current_page"; then
-            echo -e "${YELLOW}Анализ использования диска...${NC}"
+            echo -e "${YELLOW}Analyzing disk usage...${NC}"
             echo ""
             
-            # Получаем общий размер всех образов
+            # Get total size of all images
             local total_images_bytes=0
             while IFS='|' read -r id repository tag size created; do
                 if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
@@ -1137,7 +1137,7 @@ images_submenu() {
                 fi
             done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
             
-            echo -e "${CYAN}Общий размер образов: ${YELLOW}$(format_bytes $total_images_bytes)${NC}"
+            echo -e "${CYAN}Total images size: ${YELLOW}$(format_bytes $total_images_bytes)${NC}"
             echo ""
         fi
         show_images_menu
@@ -1146,7 +1146,7 @@ images_submenu() {
             1)
                 if delete_selected_images; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
@@ -1169,71 +1169,71 @@ images_submenu() {
                 press_enter_to_continue
                 ;;
             6)
-                # Обновляем список на первой странице
+                # Refresh list on first page
                 current_page=1
                 ;;
             7)
-                # Новая функция: обновить выбранный образ
+                # New function: update selected image
                 if update_selected_image; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
                 fi
                 ;;
             8)
-                # Новая функция: запушить выбранный образ
+                # New function: push selected image
                 if push_selected_image; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
                 fi
                 ;;
             9)
-                # Следующая страница
+                # Next page
                 if [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ]; then
                     current_page=$((IMAGES_CURRENT_PAGE + 1))
                 else
-                    echo -e "${YELLOW}ℹ️  Это последняя страница${NC}"
+                    echo -e "${YELLOW}ℹ️  This is the last page${NC}"
                     press_enter_to_continue
                 fi
                 ;;
             10)
-                # Предыдущая страница
+                # Previous page
                 if [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ]; then
                     current_page=$((IMAGES_CURRENT_PAGE - 1))
                 else
-                    echo -e "${YELLOW}ℹ️  Это первая страница${NC}"
+                    echo -e "${YELLOW}ℹ️  This is the first page${NC}"
                     press_enter_to_continue
                 fi
                 ;;
             11)
-                # Переход к управлению контейнерами
+                # Switch to container management
                 return 1
                 ;;
             0)
                 return 0
                 ;;
             *)
-                echo -e "${RED}❌ Неверный выбор. Попробуйте снова.${NC}"
+                echo -e "${RED}❌ Invalid choice. Try again.${NC}"
                 sleep 2
                 ;;
         esac
     done
 }
 
-# Главное меню для работы с контейнерами с поддержкой пагинации - УПРОЩЕННАЯ
+# Main menu for container management with pagination - SIMPLIFIED
 containers_submenu() {
     local current_page=${1:-1}
     
     while true; do
         print_header
-        show_containers_stats  # Только статистика сверху
+        show_containers_stats  # Only statistics at the top
         if show_containers "$current_page"; then
-            # Убрана детальная статистика внизу
+            # Removed detailed statistics at the bottom
             echo ""
         fi
         show_containers_menu
@@ -1242,7 +1242,7 @@ containers_submenu() {
             1)
                 if stop_selected_containers; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
@@ -1251,7 +1251,7 @@ containers_submenu() {
             2)
                 if delete_selected_containers; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
@@ -1260,7 +1260,7 @@ containers_submenu() {
             3)
                 if stop_and_delete_containers; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
@@ -1269,76 +1269,76 @@ containers_submenu() {
             4)
                 if start_selected_containers; then
                     echo ""
-                    echo -e "${GREEN}✅ Операция завершена${NC}"
+                    echo -e "${GREEN}✅ Operation completed${NC}"
                     press_enter_to_continue
                 else
                     press_enter_to_continue
                 fi
                 ;;
             5)
-                # Обновляем список на первой странице
+                # Refresh list on first page
                 current_page=1
                 ;;
             6)
-                # Следующая страница
+                # Next page
                 if [ "${CONTAINERS_CURRENT_PAGE:-1}" -lt "${CONTAINERS_TOTAL_PAGES}" ]; then
                     current_page=$((CONTAINERS_CURRENT_PAGE + 1))
                 else
-                    echo -e "${YELLOW}ℹ️  Это последняя страница${NC}"
+                    echo -e "${YELLOW}ℹ️  This is the last page${NC}"
                     press_enter_to_continue
                 fi
                 ;;
             7)
-                # Предыдущая страница
+                # Previous page
                 if [ "${CONTAINERS_CURRENT_PAGE:-1}" -gt 1 ]; then
                     current_page=$((CONTAINERS_CURRENT_PAGE - 1))
                 else
-                    echo -e "${YELLOW}ℹ️  Это первая страница${NC}"
+                    echo -e "${YELLOW}ℹ️  This is the first page${NC}"
                     press_enter_to_continue
                 fi
                 ;;
             8)
-                # Переход к управлению образами
+                # Switch to image management
                 return 1
                 ;;
             0)
                 return 0
                 ;;
             *)
-                echo -e "${RED}❌ Неверный выбор. Попробуйте снова.${NC}"
+                echo -e "${RED}❌ Invalid choice. Try again.${NC}"
                 sleep 2
                 ;;
         esac
     done
 }
 
-# Функция для отображения главного меню
+# Function to display main menu
 show_main_menu() {
     print_header
-    echo -e "${CYAN}🏠 Главное меню:${NC}"
+    echo -e "${CYAN}🏠 Main menu:${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}1. 📦  Показать все образы${NC}"
-    echo -e "${GREEN}2. 🐳  Показать все контейнеры${NC}"
+    echo -e "${GREEN}1. 📦  Show all images${NC}"
+    echo -e "${GREEN}2. 🐳  Show all containers${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}3. 🧹  Очистка системы Docker${NC}"
+    echo -e "${YELLOW}3. 🧹  Docker system cleanup${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}0. 🚪  Выход${NC}"
+    echo -e "${GREEN}0. 🚪  Exit${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    safe_read "${CYAN}🎯 Выберите пункт меню [0-3]: ${NC}" choice 1
+    safe_read "${CYAN}🎯 Select menu item [0-3]: ${NC}" choice 1
 }
 
-# Функция для очистки системы Docker
+# Function for Docker system cleanup
 cleanup_docker_system() {
     print_header
-    echo -e "${YELLOW}🧹 Очистка системы Docker:${NC}"
+    echo -e "${YELLOW}🧹 Docker system cleanup:${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}1. 🗑️   Удалить неиспользуемые образы${NC}"
-    echo -e "${ORANGE}2. 🔍   Удалить образы с тегом <none>${NC}"
-    echo -e "${PURPLE}3. 🛠️   Удалить кеш сборок Docker${NC}"
-    echo -e "${RED}4. 💥   Полная очистка системы${NC}"
-    echo -e "${GREEN}0. 🏠   Назад в главное меню${NC}"
+    echo -e "${GREEN}1. 🗑️   Delete unused images${NC}"
+    echo -e "${ORANGE}2. 🔍   Delete images with <none> tag${NC}"
+    echo -e "${PURPLE}3. 🛠️   Delete Docker build cache${NC}"
+    echo -e "${RED}4. 💥   Full system cleanup${NC}"
+    echo -e "${GREEN}0. 🏠   Back to main menu${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    safe_read "${CYAN}🎯 Выберите операцию [0-4]: ${NC}" choice 1
+    safe_read "${CYAN}🎯 Select operation [0-4]: ${NC}" choice 1
     
     case $choice in
         1)
@@ -1354,21 +1354,21 @@ cleanup_docker_system() {
             press_enter_to_continue
             ;;
         4)
-            echo -e "${RED}🚨 Полная очистка системы Docker...${NC}"
-            echo -e "${YELLOW}Это удалит:${NC}"
-            echo -e "  • Все остановленные контейнеры"
-            echo -e "  • Все неиспользуемые сети"
-            echo -e "  • Все неиспользуемые образы"
-            echo -e "  • Все неиспользуемые сборки"
-            echo -e "  • Все неиспользуемые кэши"
+            echo -e "${RED}🚨 Full Docker system cleanup...${NC}"
+            echo -e "${YELLOW}This will delete:${NC}"
+            echo -e "  • All stopped containers"
+            echo -e "  • All unused networks"
+            echo -e "  • All unused images"
+            echo -e "  • All unused builds"
+            echo -e "  • All unused caches"
             echo ""
-            safe_read "Вы уверены? (введите 'CLEAN' для подтверждения): " confirm 10
+            safe_read "Are you sure? (enter 'CLEAN' to confirm): " confirm 10
             if [ "$confirm" = "CLEAN" ]; then
                 echo ""
                 docker system prune -a -f
-                echo -e "${GREEN}✅ Полная очистка завершена${NC}"
+                echo -e "${GREEN}✅ Full cleanup completed${NC}"
             else
-                echo -e "${GREEN}✅ Отмена очистки${NC}"
+                echo -e "${GREEN}✅ Cleanup cancelled${NC}"
             fi
             press_enter_to_continue
             ;;
@@ -1376,32 +1376,32 @@ cleanup_docker_system() {
             return
             ;;
         *)
-            echo -e "${RED}❌ Неверный выбор.${NC}"
+            echo -e "${RED}❌ Invalid choice.${NC}"
             sleep 2
             ;;
     esac
 }
 
-# Основной цикл программы
+# Main program loop
 while true; do
     show_main_menu
     
     case $choice in
         1)
             if images_submenu; then
-                # Возврат в главное меню
+                # Return to main menu
                 continue
             else
-                # Переход к контейнерам
+                # Switch to containers
                 containers_submenu
             fi
             ;;
         2)
             if containers_submenu; then
-                # Возврат в главное меню
+                # Return to main menu
                 continue
             else
-                # Переход к образам
+                # Switch to images
                 images_submenu
             fi
             ;;
@@ -1409,11 +1409,11 @@ while true; do
             cleanup_docker_system
             ;;
         0)
-            echo -e "${GREEN}👋 Выход...${NC}"
+            echo -e "${GREEN}👋 Exiting...${NC}"
             exit 0
             ;;
         *)
-            echo -e "${RED}❌ Неверный выбор. Попробуйте снова.${NC}"
+            echo -e "${RED}❌ Invalid choice. Try again.${NC}"
             sleep 2
             ;;
     esac
