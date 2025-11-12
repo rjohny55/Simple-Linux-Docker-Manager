@@ -342,7 +342,7 @@ show_containers_stats() {
     local available_ram_display=$(format_bytes $available_ram)
     local containers_memory_display=$(format_bytes $total_memory_bytes)
     
-   # Простой двухстрочный layout без закрывающих границ
+    # Простой двухстрочный layout без закрывающих границ
     echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN} • Свободно:${NC} $available_ram_display" • Всего RAM:${NC} $total_ram_display ${CYAN}
     echo -e "${CYAN}║ ${GREEN}• Запущено:${NC} $running_containers" • Остановлено:${NC} $stopped_containers ${CYAN} • Всего:${NC} $total_containers ${CYAN} 
     
