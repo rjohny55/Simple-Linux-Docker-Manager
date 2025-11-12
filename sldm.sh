@@ -343,8 +343,8 @@ show_containers_stats() {
     local containers_memory_display=$(format_bytes $total_memory_bytes)
     
     # Simple two-line layout without closing borders
-    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Total:${NC} $total_containers ${CYAN}• Running:${NC} $running_containers"
-    echo -e "${CYAN}║ ${GREEN}• Stopped:${NC} $stopped_containers ${CYAN}• Total RAM:${NC} $total_ram_display ${CYAN}• Free:${NC} $available_ram_display"
+    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Free:${NC} $available_ram_display ${CYAN}• Total RAM:${NC} $total_ram_display"
+    echo -e "${CYAN}║ ${GREEN}• Running:${NC} $running_containers ${CYAN}• Stopped:${NC} $stopped_containers ${CYAN}• Total:${NC} $total_containers"
     
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
