@@ -71,7 +71,7 @@ safe_read() {
         # Handle Ctrl+C
         if [ $ret -ne 0 ]; then
             echo ""
-            echo -e "${YELLOW}⚠️  Cancelled by user${NC}"
+            echo -e "${YELLOW}⚠️  Operation cancelled by user${NC}"
             return 1
         fi
         
@@ -129,7 +129,7 @@ size_to_bytes() {
     fi
 }
 
-# Function to format bytes to human readable format
+# Function to format bytes to human-readable format
 format_bytes() {
     local bytes=$1
     if [ -z "$bytes" ] || [ "$bytes" -eq 0 ]; then
@@ -197,7 +197,7 @@ get_container_memory() {
     fi
 }
 
-# Function to get overall memory statistics - SIMPLIFIED
+# Function to get general memory statistics - SIMPLIFIED
 get_memory_stats() {
     local total_ram=0
     local available_ram=0
@@ -223,17 +223,22 @@ get_memory_stats() {
     echo "$total_ram $available_ram $used_ram"
 }
 
-# Function to get total container memory usage - SIMPLE
+# Function to get total container memory usage - FIXED
 get_total_containers_memory() {
     local total_memory_bytes=0
     
-    # Get only running containers and sum their memory
-    while IFS=$'\t' read -r container mem_usage; do
-        if [ -n "$container" ] && [ "$container" != "CONTAINER" ]; then
-            local mem_bytes=$(size_to_bytes "$mem_usage")
-            total_memory_bytes=$((total_memory_bytes + mem_bytes))
-        fi
-    done < <(docker stats --no-stream --format "table {{.Container}}\t{{.MemUsage}}" 2>/dev/null)
+    # Get memory usage for each running container
+    if command -v docker >/dev/null 2>&1; then
+        # Use docker stats to get memory usage of all running containers
+        while IFS= read -r mem_usage; do
+            if [ -n "$mem_usage" ] && [ "$mem_usage" != "MEM USAGE" ]; then
+                # Extract only memory usage value (before '/')
+                local mem_value=$(echo "$mem_usage" | cut -d'/' -f1 | tr -d ' ')
+                local mem_bytes=$(size_to_bytes "$mem_value")
+                total_memory_bytes=$((total_memory_bytes + mem_bytes))
+            fi
+        done < <(docker stats --no-stream --format "table {{.MemUsage}}" 2>/dev/null | tail -n +2)
+    fi
     
     echo "$total_memory_bytes"
 }
@@ -286,7 +291,7 @@ show_disk_stats() {
         local disk_used_bytes=$((disk_used * 1024))
         local disk_available_bytes=$((disk_available * 1024))
         
-        # Get total images size
+        # Get total size of images
         local total_images_bytes=0
         while IFS='|' read -r id repository tag size created; do
             if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
@@ -310,7 +315,7 @@ show_disk_stats() {
     echo ""
 }
 
-# Function to display container statistics - SIMPLIFIED
+# Function to display container statistics - FIXED
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║ 🐳 DOCKER CONTAINERS                   📊 SYSTEM STATISTICS                    ║${NC}"
@@ -324,7 +329,7 @@ show_containers_stats() {
     # Get total container memory usage
     local total_memory_bytes=$(get_total_containers_memory)
     
-    # Get overall system memory statistics
+    # Get general system memory statistics
     read -r total_ram available_ram used_ram <<< "$(get_memory_stats)"
     
     local containers_ram_percent=0
@@ -335,8 +340,9 @@ show_containers_stats() {
     # Format sizes for display
     local total_ram_display=$(format_bytes $total_ram)
     local available_ram_display=$(format_bytes $available_ram)
+    local containers_memory_display=$(format_bytes $total_memory_bytes)
     
-    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $(format_bytes $total_memory_bytes) ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Total:${NC} $total_containers ${CYAN}• Running:${NC} $running_containers ║"
+    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Total:${NC} $total_containers ${CYAN}• Running:${NC} $running_containers ║"
     echo -e "${CYAN}║ ${GREEN}• Stopped:${NC} $stopped_containers ${CYAN}• Total RAM:${NC} $total_ram_display ${CYAN}• Free:${NC} $available_ram_display                          ║"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -348,7 +354,7 @@ print_header() {
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════╗"
     echo "║           Simple Linux Docker Manager            ║"
-    echo "║           IMAGE AND CONTAINER MANAGEMENT         ║"
+    echo "║           DOCKER IMAGES AND CONTAINERS           ║"
     echo "║          https://github.com/rjohny55/            ║"
     echo "║           Simple-Linux-Docker-Manager            ║"
     echo "╚══════════════════════════════════════════════════╝"
