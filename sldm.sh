@@ -278,7 +278,7 @@ check_cancel() {
 # Function to display disk statistics (for images)
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 📦 DOCKER IMAGES                        📊 SYSTEM STATISTICS                    ║${NC}"
+    echo -e "${CYAN}║ 📦 DOCKER IMAGES                        📊 SYSTEM STATISTICS                     ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
     # Get disk statistics
@@ -315,10 +315,10 @@ show_disk_stats() {
     echo ""
 }
 
-# Function to display container statistics - FIXED
+# Function to display container statistics - FIXED BOUNDARIES
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 🐳 DOCKER CONTAINERS                   📊 SYSTEM STATISTICS                    ║${NC}"
+    echo -e "${CYAN}║ 🐳 DOCKER CONTAINERS                   📊 SYSTEM STATISTICS                      ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
     # Get general container information
@@ -342,8 +342,10 @@ show_containers_stats() {
     local available_ram_display=$(format_bytes $available_ram)
     local containers_memory_display=$(format_bytes $total_memory_bytes)
     
-    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Total:${NC} $total_containers ${CYAN}• Running:${NC} $running_containers ║"
-    echo -e "${CYAN}║ ${GREEN}• Stopped:${NC} $stopped_containers ${CYAN}• Total RAM:${NC} $total_ram_display ${CYAN}• Free:${NC} $available_ram_display                          ║"
+    # Simple two-line layout without closing borders
+    echo -e "${CYAN}║ ${GREEN}• Containers:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Total:${NC} $total_containers ${CYAN}• Running:${NC} $running_containers"
+    echo -e "${CYAN}║ ${GREEN}• Stopped:${NC} $stopped_containers ${CYAN}• Total RAM:${NC} $total_ram_display ${CYAN}• Free:${NC} $available_ram_display"
+    
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
