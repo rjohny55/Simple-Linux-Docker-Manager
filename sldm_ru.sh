@@ -449,7 +449,7 @@ show_containers() {
     local end_index=$(( page * page_size ))
     
     echo -e "${YELLOW}🐳 Список Docker контейнеров (Страница $page):${NC}"
-    echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
     
     local counter=1
     local display_counter=0
@@ -462,10 +462,10 @@ show_containers() {
     local total_containers=$(echo "$all_containers" | wc -l)
     local total_pages=$(( (total_containers + page_size - 1) / page_size ))
     
-    # Заголовок таблицы
-    printf "${GREEN}%-3s${NC} ${PURPLE}%-15s${NC} ${CYAN}%-25s${NC} ${BLUE}%-20s${NC} ${YELLOW}%-18s${NC} ${RED}%-12s${NC}\n" \
-        "№" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
-    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
+    # Заголовок таблицы - скорректированные ширины
+    printf "${GREEN}%-3s${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${BLUE}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
+        "No" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
+    echo -e "${BLUE}────────────────────────────────────────────────────────────────────────────────────${NC}"
     
     while IFS='|' read -r id image status names; do
         if [ -n "$id" ] && [ "$id" != "CONTAINER ID" ]; then
@@ -479,7 +479,7 @@ show_containers() {
                 local ip=$(get_container_ip "$id")
                 local memory=$(get_container_memory "$id" "$status")
                 
-                # Определяем цвет статуса
+                 # Определяем цвет статуса
                 status_color=$GREEN
                 if [[ "$status" == *"Exited"* ]] || [[ "$status" == *"Dead"* ]]; then
                     status_color=$RED
@@ -489,8 +489,9 @@ show_containers() {
                     status_color=$YELLOW
                 fi
                 
-                printf "${GREEN}%-3d${NC} ${PURPLE}%-15s${NC} ${CYAN}%-25s${NC} ${status_color}%-20s${NC} ${YELLOW}%-18s${NC} ${RED}%-12s${NC}\n" \
-                    "$display_counter" "${id:0:12}" "${names:0:25}" "${status:0:20}" "$ip" "$memory"
+                 #Скорректированное форматирование строк с большим местом для СТАТУСА
+                printf "${GREEN}%-3d${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${status_color}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
+                    "$display_counter" "${id:0:12}" "${names:0:20}" "${status:0:19}" "$ip" "$memory"
                 
                 ((display_counter++))
             fi
@@ -498,11 +499,11 @@ show_containers() {
         fi
     done <<< "$all_containers"
     
-    echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
     
-    # Отображаем навигацию по страницам если нужно
+   # Отображаем навигацию по страницам если нужно
     if [ $total_pages -gt 1 ]; then
-        echo -e "${CYAN}📄 Страница ${YELLOW}$page${CYAN} из ${YELLOW}$total_pages${CYAN}. Всего контейнеров: ${YELLOW}$total_containers${NC}"
+        echo -e "${CYAN}📄 Страница ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Всего контейнеров: ${YELLOW}$total_containers${NC}"
         echo -e "${CYAN}🔍 Используйте навигацию в меню для перехода между страницами${NC}"
     fi
     
