@@ -305,10 +305,10 @@ show_disk_stats() {
             images_percent=$(safe_calc "scale=1; $total_images_bytes * 100 / $disk_total_bytes")
         fi
         
-        echo -e "${CYAN}║ ${GREEN}• Images:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Disk:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Free:${NC} $(format_bytes $disk_available_bytes) ║"
-        echo -e "${CYAN}║ ${GREEN}• Used by images:${NC} ${images_percent}% ${CYAN}• Total images:${NC} $(docker images -q | wc -l)                                  ║"
+        echo -e "${CYAN}║ ${GREEN}• Images:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Disk:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Free:${NC} $(format_bytes $disk_available_bytes) "
+        echo -e "${CYAN}║ ${GREEN}• Used by images:${NC} ${images_percent}% ${CYAN}• Total images:${NC} $(docker images -q | wc -l)"
     else
-        echo -e "${CYAN}║ ${RED}Failed to get disk information${NC}                                                          ║"
+        echo -e "${CYAN}║ ${RED}Failed to get disk information${NC}"
     fi
     
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
