@@ -223,17 +223,22 @@ get_memory_stats() {
     echo "$total_ram $available_ram $used_ram"
 }
 
-# Функция для получения общего использования памяти контейнерами - ПРОСТАЯ
+# Функция для получения общего использования памяти контейнерами - ИСПРАВЛЕННАЯ
 get_total_containers_memory() {
     local total_memory_bytes=0
     
-    # Получаем только запущенные контейнеры и суммируем их память
-    while IFS=$'\t' read -r container mem_usage; do
-        if [ -n "$container" ] && [ "$container" != "CONTAINER" ]; then
-            local mem_bytes=$(size_to_bytes "$mem_usage")
-            total_memory_bytes=$((total_memory_bytes + mem_bytes))
-        fi
-    done < <(docker stats --no-stream --format "table {{.Container}}\t{{.MemUsage}}" 2>/dev/null)
+    # Получаем использование памяти для каждого запущенного контейнера
+    if command -v docker >/dev/null 2>&1; then
+        # Используем docker stats для получения использования памяти всех запущенных контейнеров
+        while IFS= read -r mem_usage; do
+            if [ -n "$mem_usage" ] && [ "$mem_usage" != "MEM USAGE" ]; then
+                # Извлекаем только значение использования памяти (до '/')
+                local mem_value=$(echo "$mem_usage" | cut -d'/' -f1 | tr -d ' ')
+                local mem_bytes=$(size_to_bytes "$mem_value")
+                total_memory_bytes=$((total_memory_bytes + mem_bytes))
+            fi
+        done < <(docker stats --no-stream --format "table {{.MemUsage}}" 2>/dev/null | tail -n +2)
+    fi
     
     echo "$total_memory_bytes"
 }
@@ -310,7 +315,7 @@ show_disk_stats() {
     echo ""
 }
 
-# Функция для отображения статистики контейнеров - УПРОЩЕННАЯ
+# Функция для отображения статистики контейнеров - ИСПРАВЛЕННАЯ
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║ 🐳 КОНТЕЙНЕРЫ DOCKER                     📊 СТАТИСТИКА СИСТЕМЫ                   ║${NC}"
@@ -335,8 +340,9 @@ show_containers_stats() {
     # Форматируем размеры для отображения
     local total_ram_display=$(format_bytes $total_ram)
     local available_ram_display=$(format_bytes $available_ram)
+    local containers_memory_display=$(format_bytes $total_memory_bytes)
     
-    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $(format_bytes $total_memory_bytes) ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Всего:${NC} $total_containers ${CYAN}• Запущено:${NC} $running_containers ║"
+    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Всего:${NC} $total_containers ${CYAN}• Запущено:${NC} $running_containers ║"
     echo -e "${CYAN}║ ${GREEN}• Остановлено:${NC} $stopped_containers ${CYAN}• Всего RAM:${NC} $total_ram_display ${CYAN}• Свободно:${NC} $available_ram_display                          ║"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -354,6 +360,13 @@ print_header() {
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
+}
+
+# Функция для ожидания нажатия Enter
+press_enter_to_continue() {
+    echo ""
+    echo -e "${CYAN}Нажмите Enter для продолжения...${NC}"
+    safe_read "" dummy_input
 }
 
 # Функция для ожидания нажатия Enter
