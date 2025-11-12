@@ -278,7 +278,7 @@ check_cancel() {
 # Функция для отображения статистики диска (для образов)
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 📦 ОБРАЗЫ DOCKER                        📊 СТАТИСТИКА СИСТЕМЫ                   ║${NC}"
+    echo -e "${CYAN}║ 📦 ОБРАЗЫ DOCKER                        📊 СТАТИСТИКА СИСТЕМЫ                    ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
     # Получаем статистику диска
@@ -305,17 +305,17 @@ show_disk_stats() {
             images_percent=$(safe_calc "scale=1; $total_images_bytes * 100 / $disk_total_bytes")
         fi
         
-        echo -e "${CYAN}║ ${GREEN}• Образы:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Диск:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Свободно:${NC} $(format_bytes $disk_available_bytes) ║"
-        echo -e "${CYAN}║ ${GREEN}• Занято образами:${NC} ${images_percent}% ${CYAN}• Всего образов:${NC} $(docker images -q | wc -l)                                  ║"
+        echo -e "${CYAN}║ ${GREEN}• Образы:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Диск:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Свободно:${NC} $(format_bytes $disk_available_bytes) "
+        echo -e "${CYAN}║ ${GREEN}• Занято образами:${NC} ${images_percent}% ${CYAN}• Всего образов:${NC} $(docker images -q | wc -l) "
     else
-        echo -e "${CYAN}║ ${RED}Не удалось получить информацию о диске${NC}                                                          ║"
+        echo -e "${CYAN}║ ${RED}Не удалось получить информацию о диске${NC}"
     fi
     
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
-# Функция для отображения статистики контейнеров - ИСПРАВЛЕННАЯ
+# Функция для отображения статистики контейнеров - ИСПРАВЛЕННЫЕ ГРАНИЦЫ
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║ 🐳 КОНТЕЙНЕРЫ DOCKER                     📊 СТАТИСТИКА СИСТЕМЫ                   ║${NC}"
@@ -342,8 +342,10 @@ show_containers_stats() {
     local available_ram_display=$(format_bytes $available_ram)
     local containers_memory_display=$(format_bytes $total_memory_bytes)
     
-    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Всего:${NC} $total_containers ${CYAN}• Запущено:${NC} $running_containers ║"
-    echo -e "${CYAN}║ ${GREEN}• Остановлено:${NC} $stopped_containers ${CYAN}• Всего RAM:${NC} $total_ram_display ${CYAN}• Свободно:${NC} $available_ram_display                          ║"
+    # Простой двухстрочный layout без закрывающих границ
+    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN}• Всего:${NC} $total_containers ${CYAN}• Запущено:${NC} $running_containers"
+    echo -e "${CYAN}║ ${GREEN}• Остановлено:${NC} $stopped_containers ${CYAN}• Всего RAM:${NC} $total_ram_display ${CYAN}• Свободно:${NC} $available_ram_display"
+    
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
