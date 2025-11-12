@@ -441,8 +441,8 @@ show_containers() {
     local start_index=$(( (page - 1) * page_size + 1 ))
     local end_index=$(( page * page_size ))
     
-    echo -e "${YELLOW}🐳 Docker containers list (Page $page):${NC}"
-    echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}🐳 Docker Containers List (Page $page):${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
     
     local counter=1
     local display_counter=0
@@ -450,15 +450,15 @@ show_containers() {
     declare -g container_names=()
     declare -g container_status=()
     
-    # Get total container count for pagination
+    # Get total number of containers for pagination
     local all_containers=$(docker ps -a --format "table {{.ID}}|{{.Image}}|{{.Status}}|{{.Names}}" | tail -n +2)
     local total_containers=$(echo "$all_containers" | wc -l)
     local total_pages=$(( (total_containers + page_size - 1) / page_size ))
     
-    # Table header
-    printf "${GREEN}%-3s${NC} ${PURPLE}%-15s${NC} ${CYAN}%-25s${NC} ${BLUE}%-20s${NC} ${YELLOW}%-18s${NC} ${RED}%-12s${NC}\n" \
-        "№" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
-    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
+    # Table header - adjusted widths
+    printf "${GREEN}%-3s${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${BLUE}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
+        "No" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
+    echo -e "${BLUE}────────────────────────────────────────────────────────────────────────────────────${NC}"
     
     while IFS='|' read -r id image status names; do
         if [ -n "$id" ] && [ "$id" != "CONTAINER ID" ]; then
@@ -468,7 +468,7 @@ show_containers() {
                 container_names[$display_counter]="$names"
                 container_status[$display_counter]="$status"
                 
-                # Get container IP and memory
+                # Get IP and memory for container
                 local ip=$(get_container_ip "$id")
                 local memory=$(get_container_memory "$id" "$status")
                 
@@ -482,8 +482,9 @@ show_containers() {
                     status_color=$YELLOW
                 fi
                 
-                printf "${GREEN}%-3d${NC} ${PURPLE}%-15s${NC} ${CYAN}%-25s${NC} ${status_color}%-20s${NC} ${YELLOW}%-18s${NC} ${RED}%-12s${NC}\n" \
-                    "$display_counter" "${id:0:12}" "${names:0:25}" "${status:0:20}" "$ip" "$memory"
+                # Adjusted row formatting with more space for STATUS
+                printf "${GREEN}%-3d${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${status_color}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
+                    "$display_counter" "${id:0:12}" "${names:0:20}" "${status:0:19}" "$ip" "$memory"
                 
                 ((display_counter++))
             fi
@@ -491,9 +492,9 @@ show_containers() {
         fi
     done <<< "$all_containers"
     
-    echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
     
-    # Display page navigation if needed
+    # Show page navigation if needed
     if [ $total_pages -gt 1 ]; then
         echo -e "${CYAN}📄 Page ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Total containers: ${YELLOW}$total_containers${NC}"
         echo -e "${CYAN}🔍 Use menu navigation to switch between pages${NC}"
@@ -502,7 +503,7 @@ show_containers() {
     echo ""
     
     if [ $display_counter -eq 0 ]; then
-        echo -e "${RED}📭 No Docker containers.${NC}"
+        echo -e "${RED}📭 No Docker containers found.${NC}"
         return 1
     fi
     
