@@ -275,7 +275,7 @@ check_cancel() {
     fi
 }
 
-# Функция для отображения статистики диска (для образов)
+# Функция для отображения статистики диска (для образов) - ИСПРАВЛЕННАЯ
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║ 📦 ОБРАЗЫ DOCKER                        📊 СТАТИСТИКА СИСТЕМЫ                    ║${NC}"
@@ -291,22 +291,37 @@ show_disk_stats() {
         local disk_used_bytes=$((disk_used * 1024))
         local disk_available_bytes=$((disk_available * 1024))
         
-        # Получаем общий размер образов
-        local total_images_bytes=0
-        while IFS='|' read -r id repository tag size created; do
-            if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-                local img_bytes=$(size_to_bytes "$size")
-                total_images_bytes=$((total_images_bytes + img_bytes))
-            fi
-        done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
+        # ИСПРАВЛЕНИЕ: Используем docker system df для получения РЕАЛЬНОГО размера образов
+        local images_info=$(docker system df --format "table {{.Type}}\t{{.Size}}" 2>/dev/null | grep -w "Images")
+        local total_images_size="0B"
+        
+        if [ -n "$images_info" ]; then
+            total_images_size=$(echo "$images_info" | awk '{print $2}')
+        else
+            # Резервный вариант: считаем вручную если docker system df не работает
+            local total_images_bytes=0
+            while IFS='|' read -r id repository tag size created; do
+                if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
+                    local img_bytes=$(size_to_bytes "$size")
+                    total_images_bytes=$((total_images_bytes + img_bytes))
+                fi
+            done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2 2>/dev/null)
+            total_images_size=$(format_bytes $total_images_bytes)
+        fi
+        
+        local total_images_count=$(docker images -q 2>/dev/null | wc -l)
+        
+        # Конвертируем размер образов в байты для расчета процентов
+        local total_images_bytes=$(size_to_bytes "$total_images_size")
         
         local images_percent=0
-        if [ "$disk_total_bytes" -gt 0 ]; then
+        if [ "$disk_total_bytes" -gt 0 ] && [ "$total_images_bytes" -gt 0 ]; then
             images_percent=$(safe_calc "scale=1; $total_images_bytes * 100 / $disk_total_bytes")
         fi
         
-        echo -e "${CYAN}║ ${GREEN}• Образы:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Диск:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Свободно:${NC} $(format_bytes $disk_available_bytes) "
-        echo -e "${CYAN}║ ${GREEN}• Занято образами:${NC} ${images_percent}% ${CYAN}• Всего образов:${NC} $(docker images -q | wc -l) "
+        # ИСПРАВЛЕНИЕ: Используем реальный размер из docker system df
+        echo -e "${CYAN}║ ${GREEN}• Образы:${NC} $total_images_size ${CYAN}• Диск:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Свободно:${NC} $(format_bytes $disk_available_bytes) "
+        echo -e "${CYAN}║ ${GREEN}• Занято образами:${NC} ${images_percent}% ${CYAN}• Всего образов:${NC} $total_images_count "
     else
         echo -e "${CYAN}║ ${RED}Не удалось получить информацию о диске${NC}"
     fi
@@ -314,7 +329,6 @@ show_disk_stats() {
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
-
 # Функция для отображения статистики контейнеров - ИСПРАВЛЕННЫЕ ГРАНИЦЫ
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
