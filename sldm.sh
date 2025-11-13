@@ -275,10 +275,10 @@ check_cancel() {
     fi
 }
 
-# Function to display disk statistics (for images)
+# Function to display disk statistics (for images) - FIXED
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 📦 DOCKER IMAGES                        📊 SYSTEM STATISTICS                     ║${NC}"
+    echo -e "${CYAN}║ 📦 DOCKER IMAGES                       📊 SYSTEM STATISTICS                     ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
     # Get disk statistics
@@ -291,22 +291,37 @@ show_disk_stats() {
         local disk_used_bytes=$((disk_used * 1024))
         local disk_available_bytes=$((disk_available * 1024))
         
-        # Get total size of images
-        local total_images_bytes=0
-        while IFS='|' read -r id repository tag size created; do
-            if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-                local img_bytes=$(size_to_bytes "$size")
-                total_images_bytes=$((total_images_bytes + img_bytes))
-            fi
-        done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
+        # FIX: Use docker system df to get REAL image size
+        local images_info=$(docker system df --format "table {{.Type}}\t{{.Size}}" 2>/dev/null | grep -w "Images")
+        local total_images_size="0B"
+        
+        if [ -n "$images_info" ]; then
+            total_images_size=$(echo "$images_info" | awk '{print $2}')
+        else
+            # Fallback: manual calculation if docker system df doesn't work
+            local total_images_bytes=0
+            while IFS='|' read -r id repository tag size created; do
+                if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
+                    local img_bytes=$(size_to_bytes "$size")
+                    total_images_bytes=$((total_images_bytes + img_bytes))
+                fi
+            done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2 2>/dev/null)
+            total_images_size=$(format_bytes $total_images_bytes)
+        fi
+        
+        local total_images_count=$(docker images -q 2>/dev/null | wc -l)
+        
+        # Convert image size to bytes for percentage calculation
+        local total_images_bytes=$(size_to_bytes "$total_images_size")
         
         local images_percent=0
-        if [ "$disk_total_bytes" -gt 0 ]; then
+        if [ "$disk_total_bytes" -gt 0 ] && [ "$total_images_bytes" -gt 0 ]; then
             images_percent=$(safe_calc "scale=1; $total_images_bytes * 100 / $disk_total_bytes")
         fi
         
-        echo -e "${CYAN}║ ${GREEN}• Images:${NC} $(format_bytes $total_images_bytes) ${CYAN}• Disk:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Free:${NC} $(format_bytes $disk_available_bytes) "
-        echo -e "${CYAN}║ ${GREEN}• Used by images:${NC} ${images_percent}% ${CYAN}• Total images:${NC} $(docker images -q | wc -l)"
+        # FIX: Use real size from docker system df
+        echo -e "${CYAN}║ ${GREEN}• Images:${NC} $total_images_size ${CYAN}• Disk:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Free:${NC} $(format_bytes $disk_available_bytes) "
+        echo -e "${CYAN}║ ${GREEN}• Used by images:${NC} ${images_percent}% ${CYAN}• Total images:${NC} $total_images_count "
     else
         echo -e "${CYAN}║ ${RED}Failed to get disk information${NC}"
     fi
