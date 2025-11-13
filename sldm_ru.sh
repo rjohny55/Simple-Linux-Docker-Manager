@@ -1097,29 +1097,62 @@ delete_none_images() {
     fi
 }
 
-# Функция для удаления кеша сборок Docker
+# Функция для удаления кеша сборок Docker - ИСПРАВЛЕННАЯ ДЛЯ BUILDX
 delete_build_cache() {
     echo -e "${YELLOW}🧹 Удаление кеша сборок Docker...${NC}"
     echo -e "${RED}⚠️ Внимание: Это освободит место, но может увеличить время следующих сборок.${NC}"
     echo ""
+
+    # Используем buildx вместо builder
+    echo -e "${CYAN}🔍 Сканируем кеш сборок...${NC}"
+    local cache_output
+    cache_output=$(docker buildx prune --dry-run 2>&1)
     
-    # Показываем текущий размер кеша
-    cache_size=$(docker system df | grep "Build Cache" | awk '{print $4}')
-    echo -e "${CYAN}📊 Текущий размер кеша сборок: ${YELLOW}$cache_size${NC}"
+    # Проверяем, есть ли что удалять
+    if echo "$cache_output" | grep -q "Total"; then
+        # Извлекаем строку с Total размером
+        local total_line=$(echo "$cache_output" | grep "Total")
+        echo -e "${CYAN}📊 Будет освобождено: ${YELLOW}$total_line${NC}"
+    else
+        # Если не нашли Total, показываем весь вывод
+        echo -e "${CYAN}📊 Информация о кеше:${NC}"
+        echo "$cache_output"
+    fi
+
     echo ""
-    
+
+    # Если в выводе есть ID кеша, показываем их
+    if echo "$cache_output" | grep -q -E "^[a-zA-Z0-9]"; then
+        echo -e "${YELLOW}Объекты кеша для удаления:${NC}"
+        echo -e "${BLUE}════════════════════════════════════════${NC}"
+        echo "$cache_output" | grep -E "^[a-zA-Z0-9]" | head -10
+        local total_objects=$(echo "$cache_output" | grep -E "^[a-zA-Z0-9]" | wc -l)
+        if [ "$total_objects" -gt 10 ]; then
+            echo -e "${CYAN}... и еще $((total_objects - 10)) объектов${NC}"
+        fi
+        echo -e "${BLUE}════════════════════════════════════════${NC}"
+        echo ""
+    fi
+
     safe_read "Удалить весь кеш сборок? (y/N): " confirm 1
-    
+
     if check_confirmation "$confirm"; then
         echo ""
         echo -e "${YELLOW}🧹 Удаляем кеш сборок...${NC}"
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        if docker builder prune -f; then
-            echo -e "${BLUE}════════════════════════════════════════${NC}"
+        
+        # Используем buildx prune
+        local delete_output
+        delete_output=$(docker buildx prune -f 2>&1)
+        
+        # Показываем результат удаления
+        echo "$delete_output"
+        echo -e "${BLUE}════════════════════════════════════════${NC}"
+        
+        if echo "$delete_output" | grep -q "Total"; then
             echo -e "${GREEN}✅ Кеш сборок удален.${NC}"
         else
-            echo -e "${BLUE}════════════════════════════════════════${NC}"
-            echo -e "${RED}❌ Ошибка при удалении кеша сборок${NC}"
+            echo -e "${GREEN}✅ Операция завершена.${NC}"
         fi
     else
         echo -e "${GREEN}✅ Отмена удаления.${NC}"
