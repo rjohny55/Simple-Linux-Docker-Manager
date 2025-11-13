@@ -1174,28 +1174,16 @@ delete_build_cache() {
     fi
 }
 
-# Main menu for image management with pagination and new functions
+# Main menu for working with images with pagination and new functions - SIMPLIFIED
 images_submenu() {
     local current_page=${1:-1}
     
     while true; do
         print_header
-        show_disk_stats
+        show_disk_stats  # This now shows all the image statistics
         if show_images "$current_page"; then
-            echo -e "${YELLOW}Analyzing disk usage...${NC}"
-            echo ""
-            
-            # Get total size of all images
-            local total_images_bytes=0
-            while IFS='|' read -r id repository tag size created; do
-                if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-                    local img_bytes=$(size_to_bytes "$size")
-                    total_images_bytes=$((total_images_bytes + img_bytes))
-                fi
-            done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
-            
-            echo -e "${CYAN}Total images size: ${YELLOW}$(format_bytes $total_images_bytes)${NC}"
-            echo ""
+            # Removed duplicate disk usage analysis - already shown in show_disk_stats
+            echo ""  # Just spacing for beauty
         fi
         show_images_menu
         
@@ -1254,7 +1242,7 @@ images_submenu() {
                 if [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ]; then
                     current_page=$((IMAGES_CURRENT_PAGE + 1))
                 else
-                    echo -e "${YELLOW}ℹ️  This is the last page${NC}"
+                    echo -e "${YELLOW}ℹ️ This is the last page${NC}"
                     press_enter_to_continue
                 fi
                 ;;
@@ -1263,7 +1251,7 @@ images_submenu() {
                 if [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ]; then
                     current_page=$((IMAGES_CURRENT_PAGE - 1))
                 else
-                    echo -e "${YELLOW}ℹ️  This is the first page${NC}"
+                    echo -e "${YELLOW}ℹ️ This is the first page${NC}"
                     press_enter_to_continue
                 fi
                 ;;
@@ -1275,7 +1263,7 @@ images_submenu() {
                 return 0
                 ;;
             *)
-                echo -e "${RED}❌ Invalid choice. Try again.${NC}"
+                echo -e "${RED}❌ Invalid choice. Please try again.${NC}"
                 sleep 2
                 ;;
         esac
