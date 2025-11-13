@@ -1173,28 +1173,16 @@ delete_build_cache() {
     fi
 }
 
-# Главное меню для работы с образами с поддержкой пагинации и новыми функциями
+# Главное меню для работы с образами с поддержкой пагинации и новыми функциями - УПРОЩЕННАЯ
 images_submenu() {
     local current_page=${1:-1}
     
     while true; do
         print_header
-        show_disk_stats
+        show_disk_stats  # Теперь здесь показывается вся статистика образов
         if show_images "$current_page"; then
-            echo -e "${YELLOW}Анализ использования диска...${NC}"
-            echo ""
-            
-            # Получаем общий размер всех образов
-            local total_images_bytes=0
-            while IFS='|' read -r id repository tag size created; do
-                if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-                    local img_bytes=$(size_to_bytes "$size")
-                    total_images_bytes=$((total_images_bytes + img_bytes))
-                fi
-            done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
-            
-            echo -e "${CYAN}Общий размер образов: ${YELLOW}$(format_bytes $total_images_bytes)${NC}"
-            echo ""
+            # Убрали дублирующий анализ использования диска - уже показан в show_disk_stats
+            echo ""  # Просто отступ для красоты
         fi
         show_images_menu
         
@@ -1253,7 +1241,7 @@ images_submenu() {
                 if [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ]; then
                     current_page=$((IMAGES_CURRENT_PAGE + 1))
                 else
-                    echo -e "${YELLOW}ℹ️  Это последняя страница${NC}"
+                    echo -e "${YELLOW}ℹ️ Это последняя страница${NC}"
                     press_enter_to_continue
                 fi
                 ;;
@@ -1262,7 +1250,7 @@ images_submenu() {
                 if [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ]; then
                     current_page=$((IMAGES_CURRENT_PAGE - 1))
                 else
-                    echo -e "${YELLOW}ℹ️  Это первая страница${NC}"
+                    echo -e "${YELLOW}ℹ️ Это первая страница${NC}"
                     press_enter_to_continue
                 fi
                 ;;
