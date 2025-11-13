@@ -369,7 +369,7 @@ print_header() {
     clear
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║           Simple Linux Docker Manager            ║"
+    echo "║           Simple Linux Docker Manager v1.0.1     ║"
     echo "║         УПРАВЛЕНИЕ ОБРАЗАМИ И КОНТЕЙНЕРАМИ       ║"
     echo "║          https://github.com/rjohny55/            ║"
     echo "║           Simple-Linux-Docker-Manager            ║"
