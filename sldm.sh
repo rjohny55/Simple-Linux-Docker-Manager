@@ -1097,29 +1097,62 @@ delete_none_images() {
     fi
 }
 
-# Function to delete Docker build cache
+# Function to delete Docker build cache - FIXED FOR BUILDX
 delete_build_cache() {
     echo -e "${YELLOW}🧹 Deleting Docker build cache...${NC}"
-    echo -e "${RED}⚠️ Warning: This will free up space but may increase next build times.${NC}"
+    echo -e "${RED}⚠️ Warning: This will free up space but may increase build times for subsequent builds.${NC}"
     echo ""
+
+    # Use buildx instead of builder
+    echo -e "${CYAN}🔍 Scanning build cache...${NC}"
+    local cache_output
+    cache_output=$(docker buildx prune --dry-run 2>&1)
     
-    # Show current cache size
-    cache_size=$(docker system df | grep "Build Cache" | awk '{print $4}')
-    echo -e "${CYAN}📊 Current build cache size: ${YELLOW}$cache_size${NC}"
+    # Check if there's anything to delete
+    if echo "$cache_output" | grep -q "Total"; then
+        # Extract the line with Total size
+        local total_line=$(echo "$cache_output" | grep "Total")
+        echo -e "${CYAN}📊 Will be freed: ${YELLOW}$total_line${NC}"
+    else
+        # If Total not found, show all output
+        echo -e "${CYAN}📊 Cache information:${NC}"
+        echo "$cache_output"
+    fi
+
     echo ""
-    
+
+    # If there are cache IDs in the output, show them
+    if echo "$cache_output" | grep -q -E "^[a-zA-Z0-9]"; then
+        echo -e "${YELLOW}Cache objects to be deleted:${NC}"
+        echo -e "${BLUE}════════════════════════════════════════${NC}"
+        echo "$cache_output" | grep -E "^[a-zA-Z0-9]" | head -10
+        local total_objects=$(echo "$cache_output" | grep -E "^[a-zA-Z0-9]" | wc -l)
+        if [ "$total_objects" -gt 10 ]; then
+            echo -e "${CYAN}... and $((total_objects - 10)) more objects${NC}"
+        fi
+        echo -e "${BLUE}════════════════════════════════════════${NC}"
+        echo ""
+    fi
+
     safe_read "Delete all build cache? (y/N): " confirm 1
-    
+
     if check_confirmation "$confirm"; then
         echo ""
         echo -e "${YELLOW}🧹 Deleting build cache...${NC}"
         echo -e "${BLUE}════════════════════════════════════════${NC}"
-        if docker builder prune -f; then
-            echo -e "${BLUE}════════════════════════════════════════${NC}"
+        
+        # Use buildx prune
+        local delete_output
+        delete_output=$(docker buildx prune -f 2>&1)
+        
+        # Show deletion result
+        echo "$delete_output"
+        echo -e "${BLUE}════════════════════════════════════════${NC}"
+        
+        if echo "$delete_output" | grep -q "Total"; then
             echo -e "${GREEN}✅ Build cache deleted.${NC}"
         else
-            echo -e "${BLUE}════════════════════════════════════════${NC}"
-            echo -e "${RED}❌ Error deleting build cache${NC}"
+            echo -e "${GREEN}✅ Operation completed.${NC}"
         fi
     else
         echo -e "${GREEN}✅ Deletion cancelled.${NC}"
