@@ -643,7 +643,7 @@ push_selected_image() {
     echo -e "${YELLOW}🔐 Authenticating to Docker registry...${NC}"
     
     # Authenticate to Docker registry
-    if echo "$docker_password" | docker login --username "$docker_username" --password-stdin; then
+    if docker login --username "$docker_username" --password-stdin <<< "$docker_password"; then
         echo -e "${GREEN}✅ Authentication successful${NC}"
     else
         echo -e "${RED}❌ Authentication error${NC}"
