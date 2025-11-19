@@ -634,7 +634,7 @@ push_selected_image() {
     fi
     
     echo -e "${CYAN}Пароль:${NC}"
-    if ! safe_read -s "> " docker_password 50; then
+    if ! safe_read -s "> " docker_password 100; then
         return 1
     fi
     
