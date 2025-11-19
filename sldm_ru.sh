@@ -357,8 +357,8 @@ show_containers_stats() {
     local containers_memory_display=$(format_bytes $total_memory_bytes)
     
     # Простой двухстрочный layout без закрывающих границ
-    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN} • Свободно:${NC} $available_ram_display" • Всего RAM:${NC} $total_ram_display
-    echo -e "${CYAN}║ ${GREEN}• Запущено:${NC} $running_containers" • Остановлено:${NC} $stopped_containers ${CYAN} • Всего:${NC} $total_containers  
+    echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN} • Свободно:${NC} $available_ram_display • Всего RAM:${NC} $total_ram_display "
+    echo -e "${CYAN}║ ${GREEN}• Запущено:${NC} $running_containers • Остановлено:${NC} $stopped_containers ${CYAN} • Всего:${NC} $total_containers " 
     
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
