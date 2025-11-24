@@ -3,6 +3,7 @@
 # ==========================================
 # Simple Linux Docker Manager (SLDM) v1.2.2
 # UI Polish: Consistent Menu Separators
+# https://github.com/rjohny55/Simple-Linux-Docker-Manager
 # ==========================================
 
 # Настройки оболочки
