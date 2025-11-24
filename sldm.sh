@@ -1,247 +1,206 @@
 #!/bin/bash
 
 # ==========================================
-# Simple Linux Docker Manager v1.0.3
-# (High Performance & Security Edition)
+# Simple Linux Docker Manager (SLDM) v1.2.2
+# English Edition (Async, Auto-Refresh, UI Polish)
+# https://github.com/rjohny55/Simple-Linux-Docker-Manager
 # ==========================================
+
+# Shell settings
+set -o pipefail
 
 # Global Constants
 readonly PAGE_SIZE=50
+readonly CACHE_TTL=5
+readonly RAM_CACHE_FILE="/tmp/sldm_ram_$(id -u).cache"
+readonly RAM_LOCK_FILE="/tmp/sldm_ram_$(id -u).lock"
 
-# Global variables for pagination
+# Global State Variables
 declare -g IMAGES_CURRENT_PAGE=1
-declare -g IMAGES_TOTAL_PAGES=1
-declare -g IMAGES_TOTAL_ITEMS=0
 declare -g CONTAINERS_CURRENT_PAGE=1
-declare -g CONTAINERS_TOTAL_PAGES=1
-declare -g CONTAINERS_TOTAL_ITEMS=0
+declare -g SEARCH_FILTER=""
 
-# Menu Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-ORANGE='\033[0;33m'
-NC='\033[0m' # No Color
+# Cache Variables
+declare -g CACHED_IMAGES_RAW=""
+declare -g CACHED_IMAGES_TIME=0
+declare -g CACHED_CONTAINERS_RAW=""
+declare -g CACHED_CONTAINERS_TIME=0
 
-# --- SECURITY AND CHECK BLOCK ---
+# GLOBAL DATA ARRAYS
+declare -ga image_ids=()
+declare -ga image_names=()
+declare -ga image_tags=()
+declare -ga container_ids=()
+declare -ga container_names=()
+declare -ga container_status=()
 
-# Cleanup function on exit (restores terminal settings)
+# Colors
+RED=$'\e[0;31m'
+GREEN=$'\e[0;32m'
+YELLOW=$'\e[1;33m'
+BLUE=$'\e[0;34m'
+PURPLE=$'\e[0;35m'
+CYAN=$'\e[0;36m'
+ORANGE=$'\e[0;33m'
+GREY=$'\e[0;37m'
+NC=$'\e[0m'
+
+# --- SECURITY & CLEANUP ---
+
 cleanup_exit() {
     stty echo 2>/dev/null
-    echo -e "\n${CYAN}👋 Script execution finished.${NC}"
+    unset docker_password
+    rm -f "$RAM_CACHE_FILE" "$RAM_LOCK_FILE"
+    echo -e "\n${CYAN}👋 See you!${NC}"
 }
-
-# Trap signals (EXIT, Ctrl+C, Termination)
 trap cleanup_exit EXIT SIGINT SIGTERM
 
-# Check dependencies before running
 check_dependencies() {
     local missing=0
-    
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}❌ Error: Docker not found. Install Docker to run the script.${NC}"
-        missing=1
-    fi
+    if ! command -v docker &> /dev/null; then echo -e "${RED}❌ Docker not found.${NC}"; missing=1; fi
+    if [ $missing -eq 0 ] && ! docker ps &> /dev/null; then echo -e "${RED}❌ No permissions for Docker.${NC}"; missing=1; fi
+    if [ "${BASH_VERSINFO:-0}" -lt 4 ]; then echo -e "${RED}❌ Bash 4.0+ required.${NC}"; missing=1; fi
+    if [ $missing -eq 1 ]; then exit 1; fi
+}
 
-    if [ $missing -eq 0 ] && ! docker ps &> /dev/null; then
-        echo -e "${RED}❌ Error: Docker command execution rights missing.${NC}"
-        echo -e "${YELLOW}💡 Tip: Run the script using sudo or add your user to the docker group.${NC}"
-        missing=1
-    fi
-    
-    # Check Bash version for associative arrays (requires bash 4.0+)
-    if [ "${BASH_VERSINFO:-0}" -lt 4 ]; then
-        echo -e "${RED}❌ Error: Bash version 4.0 or higher is required (for performance optimization).${NC}"
-        missing=1
-    fi
+# --- CACHING & ASYNC ---
 
-    if [ $missing -eq 1 ]; then
-        exit 1
+invalidate_cache() {
+    CACHED_IMAGES_RAW=""
+    CACHED_CONTAINERS_RAW=""
+}
+
+trigger_async_ram_calc() {
+    if [ -f "$RAM_LOCK_FILE" ]; then
+        local pid=$(cat "$RAM_LOCK_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then return; fi
     fi
+    (
+        echo $$ > "$RAM_LOCK_FILE"
+        local sum=0
+        if [ -n "$(docker ps -q)" ]; then
+            while IFS= read -r mem; do
+                local bytes=$(size_to_bytes "$mem")
+                sum=$((sum + bytes))
+            done < <(docker stats --no-stream --format "{{.MemUsage}}" $(docker ps -q) 2>/dev/null | cut -d'/' -f1)
+        fi
+        echo "$sum" > "$RAM_CACHE_FILE"
+        rm -f "$RAM_LOCK_FILE"
+    ) & >/dev/null 2>&1
+}
+
+force_refresh() {
+    invalidate_cache
+    rm -f "$RAM_CACHE_FILE"
+    trigger_async_ram_calc
+}
+
+get_images_list() {
+    local current_time=$(date +%s)
+    if [ -z "$CACHED_IMAGES_RAW" ] || [ $((current_time - CACHED_IMAGES_TIME)) -ge $CACHE_TTL ]; then
+        CACHED_IMAGES_RAW=$(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
+        CACHED_IMAGES_TIME=$current_time
+    fi
+    if [ -n "$SEARCH_FILTER" ]; then echo "$CACHED_IMAGES_RAW" | grep -i "$SEARCH_FILTER"; else echo "$CACHED_IMAGES_RAW"; fi
+}
+
+get_containers_list() {
+    local current_time=$(date +%s)
+    if [ -z "$CACHED_CONTAINERS_RAW" ] || [ $((current_time - CACHED_CONTAINERS_TIME)) -ge $CACHE_TTL ]; then
+        CACHED_CONTAINERS_RAW=$(docker ps -a --format "table {{.ID}}|{{.Image}}|{{.Status}}|{{.Names}}|{{.Label \"com.docker.compose.project\"}}" | tail -n +2)
+        CACHED_CONTAINERS_TIME=$current_time
+    fi
+    if [ -n "$SEARCH_FILTER" ]; then echo "$CACHED_CONTAINERS_RAW" | grep -i "$SEARCH_FILTER"; else echo "$CACHED_CONTAINERS_RAW"; fi
 }
 
 # --- UTILITIES ---
 
 safe_read() {
-    local secret=0
-    local timeout=0
-    local timeout_value=0
-    
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -s|--secret) secret=1; shift ;;
-            -t|--timeout) timeout=1; timeout_value=$2; shift 2 ;;
+    local secret=0 timeout=0 timeout_val=0 prompt="$1" var_name="$2" max_chars="${3:-100}"
+    shift 2
+    while [[ "$prompt" == -* ]]; do
+        case "$prompt" in
+            -s|--secret) secret=1; prompt="$1"; var_name="$2"; shift 2 ;;
+            -t|--timeout) timeout=1; timeout_val="$1"; prompt="$2"; var_name="$3"; shift 3 ;;
             *) break ;;
         esac
     done
-    
-    local prompt="$1"
-    local var_name="$2"
-    local max_chars="${3:-100}"
-    
-    while true; do
-        echo -ne "$prompt"
-        if [ $secret -eq 1 ]; then
-            stty -echo
-            IFS= read -r -n "$max_chars" "$var_name"
-            local ret=$?
-            stty echo
-            echo ""
-        elif [ $timeout -eq 1 ]; then
-            if IFS= read -r -t $timeout_value -n "$max_chars" "$var_name"; then local ret=0; else local ret=1; fi
-        else
-            IFS= read -r -n "$max_chars" "$var_name"
-            local ret=$?
-        fi
-        
-        if [ $ret -ne 0 ]; then return 1; fi
-        
-        if [ -n "${!var_name}" ]; then
-            local extra_chars
-            IFS= read -r -t 0.1 -n 1000 extra_chars || true
-        fi
-        
-        if [[ "${!var_name}" =~ ^[[:cntrl:]] ]]; then
-            echo -e "${RED}❌ Invalid input. Use only numbers and letters.${NC}"
-            continue
-        fi
-        break
-    done
+    [ -z "$var_name" ] && local dummy && var_name="dummy"
+    echo -ne "$prompt"
+    if [ $secret -eq 1 ]; then stty -echo; IFS= read -r -n "$max_chars" "$var_name"; stty echo; echo ""
+    elif [ $timeout -eq 1 ]; then if ! IFS= read -r -t "$timeout_val" -n "$max_chars" "$var_name"; then return 1; fi
+    else IFS= read -r -n "$max_chars" "$var_name"; fi
+    if [ -n "${!var_name}" ]; then local extra; IFS= read -r -t 0.1 -n 1000 extra || true; fi
     return 0
 }
 
 size_to_bytes() {
-    local size=$1
-    if [ -z "$size" ]; then echo "0"; return; fi
-    size=$(echo "$size" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
-    if [[ $size == *"gib" ]]; then local num=$(echo "$size" | sed 's/gib//'); echo "$(echo "$num" | awk '{printf "%.0f", $1 * 1024 * 1024 * 1024}')"
-    elif [[ $size == *"gb" ]]; then local num=$(echo "$size" | sed 's/gb//'); echo "$(echo "$num" | awk '{printf "%.0f", $1 * 1000 * 1000 * 1000}')"
-    elif [[ $size == *"mib" ]]; then local num=$(echo "$size" | sed 's/mib//'); echo "$(echo "$num" | awk '{printf "%.0f", $1 * 1024 * 1024}')"
-    elif [[ $size == *"mb" ]]; then local num=$(echo "$size" | sed 's/mb//'); echo "$(echo "$num" | awk '{printf "%.0f", $1 * 1000 * 1000}')"
-    elif [[ $size == *"kib" ]]; then local num=$(echo "$size" | sed 's/kib//'); echo "$(echo "$num" | awk '{printf "%.0f", $1 * 1024}')"
-    elif [[ $size == *"kb" ]]; then local num=$(echo "$size" | sed 's/kb//'); echo "$(echo "$num" | awk '{printf "%.0f", $1 * 1000}')"
-    elif [[ $size == *"b" ]]; then local num=$(echo "$size" | sed 's/b//'); echo "$(echo "$num" | awk '{printf "%.0f", $1}')"
-    else echo "0"; fi
+    local size=$(echo "$1" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+    local mult=1 num=0
+    case "$size" in
+        *tib) num=${size%tib}; mult=1099511627776 ;;
+        *gib) num=${size%gib}; mult=1073741824 ;;
+        *gb)  num=${size%gb};  mult=1000000000 ;;
+        *mib) num=${size%mib}; mult=1048576 ;;
+        *mb)  num=${size%mb};  mult=1000000 ;;
+        *kib) num=${size%kib}; mult=1024 ;;
+        *kb)  num=${size%kb};  mult=1000 ;;
+        *b)   num=${size%b};   mult=1 ;;
+        *)    echo "0"; return ;;
+    esac
+    awk -v n="$num" -v m="$mult" 'BEGIN {printf "%.0f", n * m}' 2>/dev/null || echo "0"
 }
 
 format_bytes() {
-    local bytes=$1
-    if [ -z "$bytes" ] || [ "$bytes" -eq 0 ]; then echo "0B"; return; fi
+    local b=$1
+    [ -z "$b" ] || [ "$b" -eq 0 ] && echo "0B" && return
     if command -v bc >/dev/null 2>&1; then
-        if [ "$bytes" -ge 1099511627776 ]; then echo "$(echo "scale=2; $bytes/1099511627776" | bc)TiB"
-        elif [ "$bytes" -ge 1073741824 ]; then echo "$(echo "scale=2; $bytes/1073741824" | bc)GiB"
-        elif [ "$bytes" -ge 1048576 ]; then echo "$(echo "scale=2; $bytes/1048576" | bc)MiB"
-        elif [ "$bytes" -ge 1024 ]; then echo "$(echo "scale=2; $bytes/1024" | bc)KiB"
-        else echo "${bytes}B"; fi
+        if [ "$b" -ge 1099511627776 ]; then echo "$(echo "scale=2; $b/1099511627776" | bc)TiB"
+        elif [ "$b" -ge 1073741824 ]; then echo "$(echo "scale=2; $b/1073741824" | bc)GiB"
+        elif [ "$b" -ge 1048576 ]; then echo "$(echo "scale=2; $b/1048576" | bc)MiB"
+        else echo "$((b/1024))KiB"; fi
     else
-        if [ "$bytes" -ge 1099511627776 ]; then echo "$((bytes / 1099511627776))TiB"
-        elif [ "$bytes" -ge 1073741824 ]; then echo "$((bytes / 1073741824))GiB"
-        elif [ "$bytes" -ge 1048576 ]; then echo "$((bytes / 1048576))MiB"
-        elif [ "$bytes" -ge 1024 ]; then echo "$((bytes / 1024))KiB"
-        else echo "${bytes}B"; fi
+        if [ "$b" -ge 1099511627776 ]; then echo "$((b/1099511627776))TiB"
+        elif [ "$b" -ge 1073741824 ]; then echo "$((b/1073741824))GiB"
+        elif [ "$b" -ge 1048576 ]; then echo "$((b/1048576))MiB"
+        else echo "$((b/1024))KiB"; fi
     fi
 }
 
-get_memory_stats() {
-    local total_ram=0 available_ram=0 used_ram=0
-    if [ -f /proc/meminfo ]; then
-        total_ram=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        available_ram=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-        total_ram=$((total_ram * 1024))
-        available_ram=$((available_ram * 1024))
-        used_ram=$((total_ram - available_ram))
+get_cpu_usage() {
+    if [ -f /proc/stat ]; then
+        read cpu a b c idle rest < /proc/stat
+        local total1=$((a+b+c+idle))
+        local idle1=$idle
+        sleep 0.1
+        read cpu a b c idle rest < /proc/stat
+        local total2=$((a+b+c+idle))
+        local idle2=$idle
+        local diff_idle=$((idle2 - idle1))
+        local diff_total=$((total2 - total1))
+        if [ $diff_total -eq 0 ]; then echo "0"; return; fi
+        echo $(( (1000 * (diff_total - diff_idle) / diff_total + 5) / 10 ))
     else
-        local memory_info=$(free -b 2>/dev/null | grep Mem:)
-        if [ -n "$memory_info" ]; then
-            total_ram=$(echo "$memory_info" | awk '{print $2}')
-            used_ram=$(echo "$memory_info" | awk '{print $3}')
-            available_ram=$(echo "$memory_info" | awk '{print $7}')
-        fi
-    fi
-    echo "$total_ram $available_ram $used_ram"
-}
-
-safe_calc() {
-    local expression=$1
-    if command -v bc >/dev/null 2>&1; then echo "$expression" | bc 2>/dev/null || echo "0"
-    else
-        local result=$(echo "$expression" | sed 's/\.//g' | awk '{print int($1)}')
-        echo "${result:-0}"
+        echo "0"
     fi
 }
 
-check_confirmation() {
-    local confirm="$1"
-    # Added English 'y' check
-    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || [ "$confirm" = "д" ] || [ "$confirm" = "Д" ]; then return 0; else return 1; fi
-}
+check_cancel() { [[ "$1" =~ ^[cCсС]$ ]]; }
 
-check_cancel() {
-    local input="$1"
-    if [[ "$input" == "c" || "$input" == "C" || "$input" == "с" || "$input" == "С" ]]; then return 0; else return 1; fi
-}
-
-# --- STATS FUNCTIONS (OPTIMIZED) ---
-
-get_total_containers_memory() {
-    local total_memory_bytes=0
-    if command -v docker >/dev/null 2>&1; then
-        while IFS= read -r mem_usage; do
-            if [ -n "$mem_usage" ] && [ "$mem_usage" != "MEM USAGE" ]; then
-                local mem_value=$(echo "$mem_usage" | cut -d'/' -f1 | tr -d ' ')
-                local mem_bytes=$(size_to_bytes "$mem_value")
-                total_memory_bytes=$((total_memory_bytes + mem_bytes))
-            fi
-        done < <(docker stats --no-stream --format "table {{.MemUsage}}" 2>/dev/null | tail -n +2)
-    fi
-    echo "$total_memory_bytes"
-}
+# --- UI DISPLAY ---
 
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 📦 DOCKER IMAGES                        📊 SYSTEM STATISTICS                    ║${NC}"
-    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
-    
-    local disk_info=$(df / | tail -1 2>/dev/null)
-    if [ -n "$disk_info" ]; then
-        local disk_total=$(echo "$disk_info" | awk '{print $2}')
-        local disk_used=$(echo "$disk_info" | awk '{print $3}')
-        local disk_available=$(echo "$disk_info" | awk '{print $4}')
-        local disk_total_bytes=$((disk_total * 1024))
-        local disk_used_bytes=$((disk_used * 1024))
-        local disk_available_bytes=$((disk_available * 1024))
-        
-        local images_info=$(docker system df --format "table {{.Type}}\t{{.Size}}" 2>/dev/null | grep -w "Images")
-        local total_images_size="0B"
-        
-        if [ -n "$images_info" ]; then
-            total_images_size=$(echo "$images_info" | awk '{print $2}')
-        else
-            # Fallback
-            local total_images_bytes=0
-            while IFS='|' read -r id repository tag size created; do
-                if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-                    local img_bytes=$(size_to_bytes "$size")
-                    total_images_bytes=$((total_images_bytes + img_bytes))
-                fi
-            done < <(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2 2>/dev/null)
-            total_images_size=$(format_bytes $total_images_bytes)
-        fi
-        
-        local total_images_count=$(docker images -q 2>/dev/null | wc -l)
-        local total_images_bytes=$(size_to_bytes "$total_images_size")
-        local images_percent=0
-        if [ "$disk_total_bytes" -gt 0 ] && [ "$total_images_bytes" -gt 0 ]; then
-            images_percent=$(safe_calc "scale=1; $total_images_bytes * 100 / $disk_total_bytes")
-        fi
-        
-        echo -e "${CYAN}║ ${GREEN}• Images:${NC} $total_images_size ${CYAN}• Disk Used:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Free:${NC} $(format_bytes $disk_available_bytes) "
-        echo -e "${CYAN}║ ${GREEN}• Disk used by images:${NC} ${images_percent}% ${CYAN}• Total Images:${NC} $total_images_count "
-    else
-        echo -e "${CYAN}║ ${RED}Failed to get disk information${NC}"
+    local docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+    local disk_info=$(df "$docker_root" | tail -1 2>/dev/null)
+    local disk_total=$(echo "$disk_info" | awk '{print $2}')
+    local disk_used=$(echo "$disk_info" | awk '{print $3}')
+    local images_size_raw=$(docker system df --format "{{.Type}}\t{{.Size}}" 2>/dev/null | grep "Images" | awk '{print $2 $3}')
+    local total_images_count=$(docker images -q 2>/dev/null | wc -l)
+
+    echo -e "${CYAN}║ 📦 ${GREEN}Images:${NC} ${images_size_raw:-0B} (${total_images_count}) ${CYAN} │ Disk:${NC} $(format_bytes $((disk_used*1024)))/$(format_bytes $((disk_total*1024)))                             ${CYAN}║${NC}"
+    if [ -n "$SEARCH_FILTER" ]; then
+         echo -e "${CYAN}║ 🔍 ${YELLOW}SEARCH:${NC} '$SEARCH_FILTER'${CYAN} (Reset: '/')${NC}"
     fi
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -249,604 +208,360 @@ show_disk_stats() {
 
 show_containers_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║ 🐳 DOCKER CONTAINERS                     📊 SYSTEM STATISTICS                   ║${NC}"
-    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
-    local total_containers=$(docker ps -aq 2>/dev/null | wc -l)
-    local running_containers=$(docker ps -q 2>/dev/null | wc -l)
-    local stopped_containers=$((total_containers - running_containers))
-    local total_memory_bytes=$(get_total_containers_memory)
+    local running=$(docker ps -q 2>/dev/null | wc -l)
+    local total=$(docker ps -aq 2>/dev/null | wc -l)
     
-    read -r total_ram available_ram used_ram <<< "$(get_memory_stats)"
-    
-    local containers_ram_percent=0
-    if [ "$total_ram" -gt 0 ] && [ "$total_memory_bytes" -gt 0 ]; then
-        containers_ram_percent=$(safe_calc "scale=1; $total_memory_bytes * 100 / $total_ram")
+    local docker_ram_display="Loading..."
+    if [ -f "$RAM_CACHE_FILE" ]; then
+        local cached_bytes=$(cat "$RAM_CACHE_FILE")
+        docker_ram_display=$(format_bytes "$cached_bytes")
+    else
+        trigger_async_ram_calc
+    fi
+
+    local sys_ram_total=0
+    if [ -f /proc/meminfo ]; then
+        local mem_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        sys_ram_total=$((mem_total_kb * 1024))
+    elif command -v sysctl >/dev/null; then
+        sys_ram_total=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
     fi
     
-    local total_ram_display=$(format_bytes $total_ram)
-    local available_ram_display=$(format_bytes $available_ram)
-    local containers_memory_display=$(format_bytes $total_memory_bytes)
+    local host_cpu=$(get_cpu_usage)
+    local c_info="Containers: ${total} (Run: ${running})"
+    local r_info="RAM: ${docker_ram_display} / $(format_bytes $sys_ram_total)"
+    local cpu_info="CPU: ${host_cpu}%"
     
-    echo -e "${CYAN}║ ${GREEN}• Containers Memory:${NC} $containers_memory_display ${CYAN}• RAM Used:${NC} ${containers_ram_percent}% ${CYAN} • Available RAM:${NC} $available_ram_display ${CYAN}• Total RAM:${NC} $total_ram_display"
-    echo -e "${CYAN}║ ${GREEN}• Running:${NC} $running_containers ${CYAN}• Stopped:${NC} $stopped_containers ${CYAN} • Total:${NC} $total_containers"
+    local BOX_WIDTH=84
+    local SPACES="                                                                                                    "
     
+    printf "${CYAN}║ 🐳 ${GREEN}%s${CYAN} │ ${YELLOW}%s${CYAN} │ ${RED}%s${NC}" "$c_info" "$r_info" "$cpu_info"
+    
+    local stripped_len=$((${#c_info} + ${#r_info} + ${#cpu_info} + 7))
+    local pad=$((BOX_WIDTH - stripped_len))
+    [ $pad -lt 0 ] && pad=0
+    
+    printf "%s\n" "${SPACES:0:$pad}"
+
+    if [ -n "$SEARCH_FILTER" ]; then
+         echo -e "${CYAN}║ 🔍 ${YELLOW}SEARCH:${NC} '$SEARCH_FILTER'${CYAN} (Reset: '/')${NC}"
+    fi
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
 
+show_help_modal() {
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║                    HELP MENU                     ║${NC}"
+    echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║${NC} ${GREEN}Navigation:${NC}                                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  n / p     - Next / Previous Page                ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  9         - Switch Images <-> Containers        ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  0         - Back / Exit                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC} ${YELLOW}Actions:${NC}                                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  r         - Refresh + Recalc RAM                ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  / or 8    - Search / Filter                     ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  1-7       - Select Menu Item                    ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  h or ?    - Show Help                           ${CYAN}║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+    press_enter
+}
+
 print_header() {
     clear
-    echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════════════════╗"
-    echo "║           Simple Linux Docker Manager v1.0.3     ║"
-    echo "║          HIGH PERFORMANCE EDITION                ║"
-    echo "║          https://github.com/rjohny55/            ║"
-    echo "║           Simple-Linux-Docker-Manager            ║"
-    echo "╚══════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo ""
+    echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║          Simple Linux Docker Manager             ║${NC}"
+    echo -e "${CYAN}║          ${GREEN}v1.2.2 English Edition${NC}                  ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}\n"
 }
 
-press_enter_to_continue() {
-    echo ""
-    echo -e "${CYAN}Press Enter to continue...${NC}"
-    safe_read "" dummy_input
-}
+press_enter() { echo ""; safe_read "${CYAN}Press Enter...${NC}" dummy; }
 
-# --- MAIN LIST FUNCTIONS ---
+# --- LIST VIEWS ---
 
 show_images() {
     local page=${1:-1}
-    local start_index=$(( (page - 1) * PAGE_SIZE + 1 ))
-    local end_index=$(( page * PAGE_SIZE ))
+    local start=$(( (page - 1) * PAGE_SIZE + 1 ))
+    local end=$(( page * PAGE_SIZE ))
     
-    echo -e "${YELLOW}📦 List of Docker Images (Page $page):${NC}"
-    echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════${NC}"
+    image_ids=(); image_names=(); image_tags=()
+    local display_count=1
     
-    local counter=1
-    local display_counter=0
-    declare -g image_ids=()
-    declare -g image_names=()
-    declare -g image_tags=()
+    local data=$(get_images_list)
+    local total_items=$(echo "$data" | grep -c . || echo 0)
+    local total_pages=$(( (total_items + PAGE_SIZE - 1) / PAGE_SIZE ))
     
-    local all_images=$(docker images --format "table {{.ID}}|{{.Repository}}|{{.Tag}}|{{.Size}}|{{.CreatedAt}}" | tail -n +2)
-    local total_images=$(echo "$all_images" | wc -l)
-    local total_pages=$(( (total_images + PAGE_SIZE - 1) / PAGE_SIZE ))
-
-    while IFS='|' read -r id repository tag size created; do
-        if [ -n "$id" ] && [ "$id" != "IMAGE ID" ]; then
-            if [ $counter -ge $start_index ] && [ $counter -le $end_index ]; then
-                image_ids[$display_counter]=$id
-                image_names[$display_counter]="$repository"
-                image_tags[$display_counter]="$tag"
-                
-                short_created=$(echo "$created" | cut -d' ' -f1)
-                printf "${GREEN}%2d.${NC} ${PURPLE}%-30s${NC} ${YELLOW}%-25s${NC} ${RED}%-10s${NC} ${ORANGE}%s${NC}\n" \
-                    "$display_counter" "${repository:0:30}" "${tag:0:25}" "$size" "$short_created"
-                
-                ((display_counter++))
-            fi
-            ((counter++))
+    echo -e "${YELLOW}📦 Image List${NC} (Page $page/$total_pages | Total: $total_items)"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local i=1
+    while IFS='|' read -r id repo tag size created; do
+        [ -z "$id" ] && continue
+        if (( i >= start && i <= end )); then
+            image_ids[$display_count]=$id
+            image_names[$display_count]="$repo"
+            image_tags[$display_count]="$tag"
+            
+            printf "${GREEN}%2d.${NC} ${PURPLE}%-30s${NC} ${YELLOW}%-20s${NC} ${RED}%-8s${NC} ${GREY}%s${NC}\n" \
+                "$display_count" "${repo:0:30}" "${tag:0:20}" "$size" "${created%% *}"
+            ((display_count++))
         fi
-    done <<< "$all_images"
+        ((i++))
+    done <<< "$data"
     
-    echo -e "${BLUE}══════════════════════════════════════════════════════════════════════════════════${NC}"
-    
-    if [ $total_pages -gt 1 ]; then
-        echo -e "${CYAN}📄 Page ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Total Images: ${YELLOW}$total_images${NC}"
-        echo -e "${CYAN}🔍 Use navigation in the menu to switch pages${NC}"
-    fi
-    
-    echo ""
-    
-    if [ $display_counter -eq 0 ]; then
-        echo -e "${RED}📭 No Docker Images found.${NC}"
-        return 1
-    fi
-    
-    IMAGES_CURRENT_PAGE=$page
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+    [ $total_items -eq 0 ] && echo -e "${RED}📭 No images found${NC}"
     IMAGES_TOTAL_PAGES=$total_pages
-    IMAGES_TOTAL_ITEMS=$total_images
-    
     return 0
 }
 
-# OPTIMIZED FUNCTION (BATCH PROCESSING)
 show_containers() {
     local page=${1:-1}
-    local start_index=$(( (page - 1) * PAGE_SIZE + 1 ))
-    local end_index=$(( page * PAGE_SIZE ))
+    local start=$(( (page - 1) * PAGE_SIZE + 1 ))
+    local end=$(( page * PAGE_SIZE ))
     
-    echo -e "${YELLOW}🐳 List of Docker Containers (Page $page):${NC}"
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
-    
-    # 1. Batch IP loading (Solves N+1 for Inspect)
+    container_ids=(); container_names=(); container_status=()
+    local display_count=1
+
     declare -A ip_map
-    if [ -n "$(docker ps -aq)" ]; then
-        # Get Full ID and IP in one command for all containers. Map key is the Short ID (12 chars).
-        while IFS='|' read -r full_id ip; do
-            short_id="${full_id:0:12}"
-            ip_map[$short_id]="$ip"
-        done < <(docker inspect --format '{{.ID}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker ps -aq) 2>/dev/null)
+    if command -v docker >/dev/null && [ -n "$(docker ps -aq)" ]; then
+         while IFS='|' read -r fid ip; do [ -n "$ip" ] && ip_map["${fid:0:12}"]="$ip"; done < <(docker inspect --format '{{.ID}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker ps -aq) 2>/dev/null)
     fi
 
-    # 2. Batch Memory loading (Solves N+1 for Stats)
-    declare -A mem_map
-    if [ -n "$(docker ps -q)" ]; then
-        # Stats only works for running containers. ID is usually Short ID.
-        while IFS=':' read -r id mem; do
-            # Clean up output from extra characters
-            mem_clean=$(echo "$mem" | cut -d'/' -f1 | tr -d ' ')
-            mem_map[$id]="$mem_clean"
-        done < <(docker stats --no-stream --format "{{.ID}}:{{.MemUsage}}" $(docker ps -q) 2>/dev/null)
-    fi
+    local data=$(get_containers_list)
+    local total_items=$(echo "$data" | grep -c . || echo 0)
+    local total_pages=$(( (total_items + PAGE_SIZE - 1) / PAGE_SIZE ))
     
-    local counter=1
-    local display_counter=0
-    declare -g container_ids=()
-    declare -g container_names=()
-    declare -g container_status=()
+    echo -e "${YELLOW}🐳 Container List${NC} (Page $page/$total_pages | Total: $total_items)"
+    echo -e "${BLUE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     
-    # Getting the list. {{.ID}} in docker ps format gives Short ID (12 chars) by default.
-    local all_containers=$(docker ps -a --format "table {{.ID}}|{{.Image}}|{{.Status}}|{{.Names}}" | tail -n +2)
-    local total_containers=$(echo "$all_containers" | wc -l)
-    local total_pages=$(( (total_containers + PAGE_SIZE - 1) / PAGE_SIZE ))
+    local SPACES="                                                                                                    "
+    local W_NAME=50
+    local W_STATUS=20
+
+    local h_name="CONTAINER NAME"
+    local h_status="STATUS"
     
-    printf "${GREEN}%-3s${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${BLUE}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
-        "No" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
-    echo -e "${BLUE}────────────────────────────────────────────────────────────────────────────────────${NC}"
+    local pad_h_name="${SPACES:0:$((W_NAME - ${#h_name}))}"
+    local pad_h_status="${SPACES:0:$((W_STATUS - ${#h_status}))}"
+
+    printf "${GREEN}%-4s${NC} ${PURPLE}%-12s${NC} ${CYAN}%s%s${NC} ${BLUE}%s%s${NC} ${YELLOW}%s${NC}\n" \
+           "No" "ID" "$h_name" "$pad_h_name" "$h_status" "$pad_h_status" "IP"
+           
+    echo -e "${BLUE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     
-    while IFS='|' read -r id image status names; do
-        if [ -n "$id" ] && [ "$id" != "CONTAINER ID" ]; then
-            if [ $counter -ge $start_index ] && [ $counter -le $end_index ]; then
-                container_ids[$display_counter]=$id
-                container_names[$display_counter]="$names"
-                container_status[$display_counter]="$status"
-                
-                # Using cached data (Instant access)
-                local ip="${ip_map[$id]}"
-                [ -z "$ip" ] && ip="-"
-                
-                local memory="${mem_map[$id]}"
-                [ -z "$memory" ] && memory="-"
-                
-                # Determine status color
-                status_color=$GREEN
-                if [[ "$status" == *"Exited"* ]] || [[ "$status" == *"Dead"* ]]; then
-                    status_color=$RED
-                elif [[ "$status" == *"Up"* ]]; then
-                    status_color=$GREEN
-                else
-                    status_color=$YELLOW
-                fi
-                
-                printf "${GREEN}%-3d${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${status_color}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
-                    "$display_counter" "${id}" "${names:0:20}" "${status:0:19}" "$ip" "$memory"
-                
-                ((display_counter++))
-            fi
-            ((counter++))
+    local i=1
+    while IFS='|' read -r id image status names compose_proj; do
+        [ -z "$id" ] && continue
+        if (( i >= start && i <= end )); then
+            container_ids[$display_count]=$id
+            container_names[$display_count]="$names"
+            container_status[$display_count]="$status"
+            
+            local label=""
+            [ -n "$compose_proj" ] && label=" [C]"
+            local label_len=${#label}
+            
+            local avail_len=$((W_NAME - label_len))
+            local name_display="${names}"
+            if [ ${#names} -gt $avail_len ]; then name_display="${names:0:$avail_len}"; fi
+            
+            local full_len=$((${#name_display} + label_len))
+            local pad_len=$((W_NAME - full_len))
+            [ $pad_len -lt 0 ] && pad_len=0
+            local padding="${SPACES:0:$pad_len}"
+            
+            local status_display="${status:0:$W_STATUS}"
+            local pad_status_len=$((W_STATUS - ${#status_display}))
+            [ $pad_status_len -lt 0 ] && pad_status_len=0
+            local padding_status="${SPACES:0:$pad_status_len}"
+
+            local ip="${ip_map[${id:0:12}]:--}"
+            local color=$GREEN
+            [[ "$status" == *"Exit"* || "$status" == *"Dead"* ]] && color=$RED
+            
+            printf "${GREEN}%-4d${NC} ${PURPLE}%-12s${NC} " "$display_count" "${id:0:12}"
+            printf "${CYAN}%s${NC}${ORANGE}%s${NC}%s " "$name_display" "$label" "$padding"
+            printf "${color}%s${NC}%s ${YELLOW}%s${NC}\n" "$status_display" "$padding_status" "$ip"
+
+            ((display_count++))
         fi
-    done <<< "$all_containers"
+        ((i++))
+    done <<< "$data"
     
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
-    
-    if [ $total_pages -gt 1 ]; then
-        echo -e "${CYAN}📄 Page ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Total containers: ${YELLOW}$total_containers${NC}"
-        echo -e "${CYAN}🔍 Use navigation in the menu to switch pages${NC}"
-    fi
-    
-    echo ""
-    
-    if [ $display_counter -eq 0 ]; then
-        echo -e "${RED}📭 No Docker Containers found.${NC}"
-        return 1
-    fi
-    
-    CONTAINERS_CURRENT_PAGE=$page
+    echo -e "${BLUE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     CONTAINERS_TOTAL_PAGES=$total_pages
-    CONTAINERS_TOTAL_ITEMS=$total_containers
-    
     return 0
 }
 
-# --- IMAGE OPERATIONS ---
+# --- ACTIONS & MENUS ---
 
-update_selected_image() {
-    echo -e "${YELLOW}🔄 Updating image from repository${NC}"
-    echo -e "${CYAN}Enter the image number to update:${NC}"
-    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
-    
-    if ! safe_read "> " input 10; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Operation cancelled.${NC}"; return 1; fi
-    if ! [[ "$input" =~ ^[0-9]+$ ]]; then echo -e "${RED}❌ Invalid number.${NC}"; return 1; fi
-    if [ -z "${image_ids[$input]}" ]; then echo -e "${RED}❌ Invalid image number.${NC}"; return 1; fi
-    
-    local image_name="${image_names[$input]}"
-    local image_tag="${image_tags[$input]}"
-    local full_image_name="$image_name:$image_tag"
-    
-    if [ "$image_name" = "<none>" ] || [ "$image_tag" = "<none>" ]; then
-        echo -e "${RED}❌ Cannot update an image without a repository name.${NC}"
-        return 1
-    fi
-    
-    echo -e "\n${YELLOW}🔄 Pulling image: ${CYAN}$full_image_name${NC}"
-    echo -e "${BLUE}════════════════════════════════════════${NC}"
-    
-    if docker pull "$full_image_name"; then
-        echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${GREEN}✅ Image updated successfully${NC}\n"
-        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" | grep "$image_name" | head -1
-    else
-        echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${RED}❌ Error updating image${NC}"
-    fi
+set_filter() {
+    echo -e "${YELLOW}🔍 Search / Filter${NC}"
+    echo -e "Enter text (empty to reset):"
+    safe_read "> " input 20
+    SEARCH_FILTER="$input"
+    IMAGES_CURRENT_PAGE=1
+    CONTAINERS_CURRENT_PAGE=1
+    force_refresh
 }
 
-push_selected_image() {
-    echo -e "${YELLOW}📤 Pushing image to repository${NC}"
-    echo -e "${CYAN}Enter the image number to push:${NC}"
-    echo -e "${ORANGE}Or enter 'c' to cancel${NC}"
-    
-    if ! safe_read "> " input 10; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Operation cancelled.${NC}"; return 1; fi
-    if ! [[ "$input" =~ ^[0-9]+$ ]]; then echo -e "${RED}❌ Invalid number.${NC}"; return 1; fi
-    if [ -z "${image_ids[$input]}" ]; then echo -e "${RED}❌ Invalid image number.${NC}"; return 1; fi
-    
-    local image_name="${image_names[$input]}"
-    local image_tag="${image_tags[$input]}"
-    local full_image_name="$image_name:$image_tag"
-    
-    if [ "$image_name" = "<none>" ] || [ "$image_tag" = "<none>" ]; then
-        echo -e "${RED}❌ Cannot push an image without a repository name.${NC}"
-        return 1
-    fi
-    
-    echo -e "\n${YELLOW}📤 Preparing to push: ${CYAN}$full_image_name${NC}\n"
-    echo -e "${YELLOW}🔐 Enter credentials:${NC}"
-    echo -e "${CYAN}Username:${NC}"
-    if ! safe_read "> " docker_username 50; then return 1; fi
-    echo -e "${CYAN}Password (or token):${NC}"
-    if ! safe_read -s "> " docker_password 200; then return 1; fi
-    
-    echo -e "\n${YELLOW}🔐 Authenticating...${NC}"
-    if docker login --username "$docker_username" --password-stdin <<< "$docker_password"; then
-        echo -e "${GREEN}✅ Authentication successful${NC}"
-    else
-        echo -e "${RED}❌ Authentication error${NC}"; return 1
-    fi
-    
-    echo -e "\n${YELLOW}📤 Pushing image...${NC}"
-    echo -e "${BLUE}════════════════════════════════════════${NC}"
-    
-    if docker push "$full_image_name"; then
-        echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${GREEN}✅ Image pushed successfully${NC}"
-        docker logout; echo -e "${YELLOW}🔒 Logged out${NC}"
-    else
-        echo -e "${BLUE}════════════════════════════════════════${NC}"
-        echo -e "${RED}❌ Error pushing image${NC}"
-        docker logout; echo -e "${YELLOW}🔒 Logged out${NC}"
-    fi
+update_image() {
+    safe_read "${CYAN}Number: ${NC}" num 5
+    [ -z "${image_ids[$num]}" ] && return
+    local full="${image_names[$num]}:${image_tags[$num]}"
+    [[ "$full" == *"<none>"* ]] && echo "${RED}Error: <none>${NC}" && return
+    echo "Pulling $full..."
+    docker pull "$full" && force_refresh && echo "${GREEN}Done${NC}" || echo "${RED}Error${NC}"
 }
 
-show_images_menu() {
-    echo -e "${CYAN}🛠️  Image Operations:${NC}"
-    echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}1. 🗑️  Delete selected images${NC}"
-    echo -e "${YELLOW}2. 🧹  Delete unused images${NC}"
-    echo -e "${RED}3. 💥  Delete ALL images${NC}"
-    echo -e "${ORANGE}4. 🔍  Delete images with <none> tag${NC}"
-    echo -e "${PURPLE}5. 🛠️  Delete Docker build cache${NC}"
-    echo -e "${BLUE}6. 🔄  Refresh image list${NC}"
-    echo -e "${CYAN}7. 🔄  Update selected image (pull)${NC}"
-    echo -e "${GREEN}8. 📤  Push selected image (push)${NC}"
-    if [ "${IMAGES_TOTAL_PAGES:-1}" -gt 1 ]; then
-        [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ] && echo -e "${CYAN}9. 📄  Next page${NC}"
-        [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ] && echo -e "${CYAN}10. 📄  Previous page${NC}"
-    fi
-    echo -e "${GREEN}11. 🐳  Go to Container management${NC}"
-    echo -e "${GREEN}0. 🏠  Exit to Main Menu${NC}"
-    echo -e "${BLUE}════════════════════════════════════════${NC}"
-    safe_read "${CYAN}🎯 Select operation: ${NC}" choice 2
+docker_push() {
+    safe_read "${CYAN}Number: ${NC}" num 5
+    [ -z "${image_ids[$num]}" ] && return
+    local full="${image_names[$num]}:${image_tags[$num]}"
+    safe_read "${CYAN}Username: ${NC}" user 50
+    safe_read -s "${CYAN}Password: ${NC}" pass 200
+    echo "$pass" | docker login --username "$user" --password-stdin
+    local ret=$?
+    unset pass
+    if [ $ret -eq 0 ]; then docker push "$full" && echo "${GREEN}Success${NC}"; docker logout; else echo "${RED}Login Failed${NC}"; fi
+    force_refresh
 }
 
-show_containers_menu() {
-    echo -e "${CYAN}🛠️  Container Operations:${NC}"
-    echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}1. ⏹️   Stop selected containers${NC}"
-    echo -e "${YELLOW}2. 🗑️   Delete selected containers${NC}"
-    echo -e "${RED}3. 💀   Stop and Delete selected containers${NC}"
-    echo -e "${GREEN}4. ▶️   Start selected containers${NC}"
-    echo -e "${BLUE}5. 🔄   Refresh container list${NC}"
-    if [ "${CONTAINERS_TOTAL_PAGES:-1}" -gt 1 ]; then
-        [ "${CONTAINERS_CURRENT_PAGE:-1}" -lt "${CONTAINERS_TOTAL_PAGES}" ] && echo -e "${CYAN}6. 📄  Next page${NC}"
-        [ "${CONTAINERS_CURRENT_PAGE:-1}" -gt 1 ] && echo -e "${CYAN}7. 📄  Previous page${NC}"
-    fi
-    echo -e "${GREEN}8. 📦   Go to Image management${NC}"
-    echo -e "${GREEN}0. 🏠   Exit to Main Menu${NC}"
-    echo -e "${BLUE}════════════════════════════════════════${NC}"
-    safe_read "${CYAN}🎯 Select operation: ${NC}" choice 1
-}
-
-# --- ARRAY ACTIONS ---
-
-delete_selected_images() {
-    echo -e "${YELLOW}🗑️ Enter image numbers (space separated):${NC}"
-    if ! safe_read "> " input 50; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Cancelled${NC}"; return 1; fi
-    [ -z "$input" ] && return 1
-    
-    read -a selected_numbers <<< "$input"
-    echo -e "\n${YELLOW}🗑️ Deleting:${NC}"
-    for num in "${selected_numbers[@]}"; do
-        [ -n "${image_ids[$num]}" ] && echo -e "  ${RED}×${NC} ${image_names[$num]}:${image_tags[$num]}"
-    done
-    
-    safe_read "Are you sure? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        echo ""
-        for num in "${selected_numbers[@]}"; do
-            if [ -n "${image_ids[$num]}" ]; then
-                echo -e "${YELLOW}🗑️ Deleting ${image_names[$num]}...${NC}"
-                docker rmi -f "${image_ids[$num]}" 2>/dev/null && echo -e "${GREEN}✅ OK${NC}" || echo -e "${RED}❌ Error${NC}"
-            fi
-        done
-        return 0
-    fi
-    echo -e "${GREEN}✅ Cancelled${NC}"; return 1
-}
-
-stop_selected_containers() {
-    echo -e "${YELLOW}⏹️ Enter container numbers (space separated):${NC}"
-    if ! safe_read "> " input 50; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Cancelled${NC}"; return 1; fi
-    
-    read -a selected_numbers <<< "$input"
-    echo -e "\n${YELLOW}⏹️ Stopping:${NC}"
-    for num in "${selected_numbers[@]}"; do
-        [ -n "${container_ids[$num]}" ] && echo -e "  ${RED}■${NC} ${container_names[$num]}"
-    done
-    
-    safe_read "Are you sure? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        echo ""
-        for num in "${selected_numbers[@]}"; do
-            if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}⏹️ Stopping ${container_names[$num]}...${NC}"
-                docker stop "${container_ids[$num]}" 2>/dev/null && echo -e "${GREEN}✅ OK${NC}" || echo -e "${RED}❌ Error${NC}"
-            fi
-        done
-        return 0
-    fi
-    echo -e "${GREEN}✅ Cancelled${NC}"; return 1
-}
-
-start_selected_containers() {
-    echo -e "${YELLOW}▶️ Enter container numbers (space separated):${NC}"
-    if ! safe_read "> " input 50; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Cancelled${NC}"; return 1; fi
-    
-    read -a selected_numbers <<< "$input"
-    echo -e "\n${YELLOW}▶️ Starting:${NC}"
-    for num in "${selected_numbers[@]}"; do
-        [ -n "${container_ids[$num]}" ] && echo -e "  ${GREEN}▶${NC} ${container_names[$num]}"
-    done
-    
-    safe_read "Are you sure? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        echo ""
-        for num in "${selected_numbers[@]}"; do
-            if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}▶️ Starting ${container_names[$num]}...${NC}"
-                docker start "${container_ids[$num]}" 2>/dev/null && echo -e "${GREEN}✅ OK${NC}" || echo -e "${RED}❌ Error${NC}"
-            fi
-        done
-        return 0
-    fi
-    echo -e "${GREEN}✅ Cancelled${NC}"; return 1
-}
-
-delete_selected_containers() {
-    echo -e "${YELLOW}🗑️ Enter container numbers (space separated):${NC}"
-    if ! safe_read "> " input 50; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Cancelled${NC}"; return 1; fi
-    
-    read -a selected_numbers <<< "$input"
-    echo -e "\n${YELLOW}🗑️ Deleting:${NC}"
-    for num in "${selected_numbers[@]}"; do
-        [ -n "${container_ids[$num]}" ] && echo -e "  ${RED}×${NC} ${container_names[$num]}"
-    done
-    
-    safe_read "Are you sure? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        echo ""
-        for num in "${selected_numbers[@]}"; do
-            if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}🗑️ Deleting ${container_names[$num]}...${NC}"
-                docker rm "${container_ids[$num]}" 2>/dev/null && echo -e "${GREEN}✅ OK${NC}" || echo -e "${RED}❌ Error${NC}"
-            fi
-        done
-        return 0
-    fi
-    echo -e "${GREEN}✅ Cancelled${NC}"; return 1
-}
-
-stop_and_delete_containers() {
-    echo -e "${YELLOW}💀 Enter numbers for stop+delete (space separated):${NC}"
-    if ! safe_read "> " input 50; then return 1; fi
-    if check_cancel "$input"; then echo -e "${GREEN}✅ Cancelled${NC}"; return 1; fi
-    
-    read -a selected_numbers <<< "$input"
-    echo -e "\n${RED}💀 Destroying:${NC}"
-    for num in "${selected_numbers[@]}"; do
-        [ -n "${container_ids[$num]}" ] && echo -e "  ${RED}☠${NC} ${container_names[$num]}"
-    done
-    
-    safe_read "Are you sure? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        echo ""
-        for num in "${selected_numbers[@]}"; do
-            if [ -n "${container_ids[$num]}" ]; then
-                echo -e "${YELLOW}💀 Stop+Delete ${container_names[$num]}...${NC}"
-                docker stop "${container_ids[$num]}" 2>/dev/null
-                docker rm "${container_ids[$num]}" 2>/dev/null && echo -e "${GREEN}✅ OK${NC}" || echo -e "${RED}❌ Error${NC}"
-            fi
-        done
-        return 0
-    fi
-    echo -e "${GREEN}✅ Cancelled${NC}"; return 1
-}
-
-# --- CLEANUP ---
-
-delete_unused_images() {
-    echo -e "${YELLOW}🧹 Deleting unused images...${NC}"
-    echo -e "${RED}⚠️  Warning: All images currently not used by running containers will be deleted!${NC}"
-    echo -e "${CYAN}(This frees space, but new container runs might require re-downloading images)${NC}"
-    
-    echo ""
-    safe_read "Are you sure? (y/N): " confirm 1
-    
-    if check_confirmation "$confirm"; then
-        echo ""
-        echo -e "${YELLOW}🚀 Performing cleanup...${NC}"
-        if docker image prune -a -f; then
-            echo -e "${GREEN}✅ Unused images deleted.${NC}"
-        else
-            echo -e "${RED}❌ Error during deletion.${NC}"
+batch_action() {
+    local type=$1 action=$2
+    echo -e "${YELLOW}Enter numbers (space separated):${NC}"
+    safe_read "> " input 50
+    check_cancel "$input" && return
+    read -a nums <<< "$input"
+    echo "Processing..."
+    for n in "${nums[@]}"; do
+        local id=""
+        [ "$type" == "img" ] && id="${image_ids[$n]}"
+        [ "$type" == "cnt" ] && id="${container_ids[$n]}"
+        if [ -n "$id" ]; then
+            if [ "$action" == "rmi" ]; then docker rmi -f "$id" 2>/dev/null; fi
+            if [ "$action" == "stop" ]; then docker stop "$id" 2>/dev/null; fi
+            if [ "$action" == "start" ]; then docker start "$id" 2>/dev/null; fi
+            if [ "$action" == "rm" ]; then docker rm "$id" 2>/dev/null; fi
+            if [ "$action" == "kill" ]; then docker stop "$id" 2>/dev/null; docker rm "$id" 2>/dev/null; fi
+            echo -e "ID ${id:0:12} -> ${GREEN}OK${NC}"
         fi
-    else
-        echo -e "${GREEN}✅ Operation cancelled.${NC}"
-    fi
+    done
+    rm -f "$RAM_CACHE_FILE"
+    invalidate_cache
+    trigger_async_ram_calc
+    press_enter
 }
 
-delete_all_images() {
-    echo -e "${RED}🚨 DANGER: Deleting ALL images!${NC}"
-    safe_read "Enter 'DELETE' to confirm: " confirm 10
-    if [ "$confirm" = "DELETE" ]; then
-        docker rmi -f $(docker images -q) 2>/dev/null && echo -e "${GREEN}✅ Deleted${NC}" || echo -e "${RED}❌ Error${NC}"
-    else
-        echo -e "${GREEN}✅ Cancelled${NC}"
-    fi
-}
-
-delete_none_images() {
-    echo -e "${YELLOW}🔍 Searching for <none> images...${NC}"
-    if [ -z "$(docker images -f "dangling=true" -q)" ]; then echo -e "${GREEN}✅ Clean${NC}"; return; fi
-    
-    docker images -f "dangling=true" --format "table {{.ID}}\t{{.Size}}\t{{.CreatedAt}}"
-    safe_read "Delete all <none> images? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        docker image prune -f && echo -e "${GREEN}✅ Deleted${NC}" || echo -e "${RED}❌ Error${NC}"
-    else
-        echo -e "${GREEN}✅ Cancelled${NC}"
-    fi
-}
-
-delete_build_cache() {
-    echo -e "${CYAN}🔍 Scanning cache...${NC}"
-    docker buildx prune --dry-run
-    safe_read "Delete cache? (y/N): " confirm 1
-    if check_confirmation "$confirm"; then
-        docker buildx prune -f && echo -e "${GREEN}✅ Cache cleared${NC}"
-    else
-        echo -e "${GREEN}✅ Cancelled${NC}"
-    fi
-}
-
-cleanup_docker_system() {
-    print_header
-    echo -e "${YELLOW}🧹 Docker System Cleanup:${NC}"
-    echo -e "${GREEN}1. 🗑️   Delete unused images${NC}"
-    echo -e "${ORANGE}2. 🔍   Delete images with <none> tag${NC}"
-    echo -e "${PURPLE}3. 🛠️   Delete Docker build cache${NC}"
-    echo -e "${RED}4. 💥   Full System Prune${NC}"
-    echo -e "${GREEN}0. 🏠   Back${NC}"
-    safe_read "${CYAN}🎯 Choice: ${NC}" choice 1
-    
-    case $choice in
-        1) delete_unused_images; press_enter_to_continue ;;
-        2) delete_none_images; press_enter_to_continue ;;
-        3) delete_build_cache; press_enter_to_continue ;;
-        4)
-            echo -e "${RED}🚨 Full System Prune (prune -a)!${NC}"
-            safe_read "Enter 'CLEAN' to confirm: " confirm 10
-            if [ "$confirm" = "CLEAN" ]; then
-                docker system prune -a -f && echo -e "${GREEN}✅ Done${NC}"
-            else
-                echo -e "${GREEN}✅ Cancelled${NC}"
-            fi
-            press_enter_to_continue
-            ;;
-        0) return ;;
-    esac
-}
-
-images_submenu() {
-    local current_page=${1:-1}
+menu_images() {
+    rm -f "$RAM_CACHE_FILE"
     while true; do
-        print_header; show_disk_stats; show_images "$current_page"; show_images_menu
-        case $choice in
-            1) delete_selected_images; press_enter_to_continue ;;
-            2) delete_unused_images; press_enter_to_continue ;;
-            3) delete_all_images; press_enter_to_continue ;;
-            4) delete_none_images; press_enter_to_continue ;;
-            5) delete_build_cache; press_enter_to_continue ;;
-            6) current_page=1 ;;
-            7) update_selected_image; press_enter_to_continue ;;
-            8) push_selected_image; press_enter_to_continue ;;
-            9) [ "${IMAGES_CURRENT_PAGE:-1}" -lt "${IMAGES_TOTAL_PAGES}" ] && current_page=$((IMAGES_CURRENT_PAGE + 1)) ;;
-            10) [ "${IMAGES_CURRENT_PAGE:-1}" -gt 1 ] && current_page=$((IMAGES_CURRENT_PAGE - 1)) ;;
-            11) return 1 ;;
+        print_header; show_disk_stats; show_images "$IMAGES_CURRENT_PAGE"
+        echo -e "${CYAN}1-3${NC} Del/Prune/All | ${CYAN}4-5${NC} None/Cache | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Search"
+        [ $IMAGES_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} Next/Prev Page"
+        echo -e "${GREEN}9${NC} To Containers | ${GREEN}0${NC} Back | ${GREEN}h${NC} Help"
+        
+        safe_read "🎯 Select: " c 1
+        case $c in
+            1) batch_action "img" "rmi" ;;
+            2) docker image prune -a -f; force_refresh; press_enter ;;
+            3) safe_read "Type DELETE to confirm: " conf; [ "$conf" == "DELETE" ] && (docker images -q | xargs -r docker rmi -f); force_refresh; press_enter ;;
+            4) docker image prune -f; force_refresh; press_enter ;;
+            5) docker buildx prune -f; press_enter ;;
+            6) update_image; press_enter ;;
+            7) docker_push; press_enter ;;
+            8|/) set_filter ;;
+            9) return 2 ;; 
+            h|?) show_help_modal ;;
+            n) [ $IMAGES_CURRENT_PAGE -lt $IMAGES_TOTAL_PAGES ] && ((IMAGES_CURRENT_PAGE++)) ;;
+            p) [ $IMAGES_CURRENT_PAGE -gt 1 ] && ((IMAGES_CURRENT_PAGE--)) ;;
             0) return 0 ;;
-            *) echo -e "${RED}❌ Invalid choice${NC}"; sleep 0.5 ;;
         esac
     done
 }
 
-containers_submenu() {
-    local current_page=${1:-1}
+menu_containers() {
+    local ram_state=0
     while true; do
-        print_header; show_containers_stats; show_containers "$current_page"; show_containers_menu
-        case $choice in
-            1) stop_selected_containers; press_enter_to_continue ;;
-            2) delete_selected_containers; press_enter_to_continue ;;
-            3) stop_and_delete_containers; press_enter_to_continue ;;
-            4) start_selected_containers; press_enter_to_continue ;;
-            5) current_page=1 ;;
-            6) [ "${CONTAINERS_CURRENT_PAGE:-1}" -lt "${CONTAINERS_TOTAL_PAGES}" ] && current_page=$((CONTAINERS_CURRENT_PAGE + 1)) ;;
-            7) [ "${CONTAINERS_CURRENT_PAGE:-1}" -gt 1 ] && current_page=$((CONTAINERS_CURRENT_PAGE - 1)) ;;
-            8) return 1 ;;
-            0) return 0 ;;
-            *) echo -e "${RED}❌ Invalid choice${NC}"; sleep 0.5 ;;
+        print_header; show_containers_stats; show_containers "$CONTAINERS_CURRENT_PAGE"
+        if [ -f "$RAM_CACHE_FILE" ]; then ram_state=1; else ram_state=0; fi
+        
+        echo -e "${CYAN}1${NC} Stop | ${CYAN}2${NC} Start | ${CYAN}3${NC} Remove | ${CYAN}4${NC} Kill | ${CYAN}5${NC} Search | ${GREEN}r${NC} Refresh"
+        [ $CONTAINERS_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} Next/Prev Page"
+        echo -e "${GREEN}9${NC} To Images | ${GREEN}0${NC} Back | ${GREEN}h${NC} Help"
+        
+        local c=""
+        while true; do
+            if [ $ram_state -eq 0 ] && [ -f "$RAM_CACHE_FILE" ]; then break; fi
+            if read -t 1 -n 1 c; then break; fi
+        done
+        
+        case $c in
+            1) batch_action "cnt" "stop" ;;
+            2) batch_action "cnt" "start" ;;
+            3) batch_action "cnt" "rm" ;;
+            4) batch_action "cnt" "kill" ;;
+            5|/) set_filter ;;
+            r) force_refresh ;;
+            9) rm -f "$RAM_CACHE_FILE"; return 2 ;;
+            h|?) show_help_modal ;;
+            n) [ $CONTAINERS_CURRENT_PAGE -lt $CONTAINERS_TOTAL_PAGES ] && ((CONTAINERS_CURRENT_PAGE++)) ;;
+            p) [ $CONTAINERS_CURRENT_PAGE -gt 1 ] && ((CONTAINERS_CURRENT_PAGE--)) ;;
+            0) rm -f "$RAM_CACHE_FILE"; return 0 ;;
         esac
     done
 }
 
-show_main_menu() {
-    print_header
-    echo -e "${CYAN}🏠 Main Menu:${NC}"
-    echo -e "${GREEN}1. 📦  Show All Images${NC}"
-    echo -e "${GREEN}2. 🐳  Show All Containers${NC}"
-    echo -e "${YELLOW}3. 🧹  Docker System Cleanup${NC}"
-    echo -e "${GREEN}0. 🚪  Exit${NC}"
-    safe_read "${CYAN}🎯 Choice: ${NC}" choice 1
+cleanup_menu() {
+    while true; do
+        print_header
+        echo -e "${YELLOW}🧹 Docker Cleanup Menu${NC}"
+        echo -e "${CYAN}1.${NC} Remove unused images (prune -a)"
+        echo -e "${CYAN}2.${NC} Remove dangling images (prune)"
+        echo -e "${CYAN}3.${NC} Clear build cache (buildx prune)"
+        echo -e "${CYAN}4.${NC} Remove unused volumes (Volume prune)"
+        echo -e "${CYAN}5.${NC} Remove unused networks (Network prune)"
+        echo -e "${RED}6. Full system cleanup (System prune -a)${NC}"
+        echo -e "${GREEN}0. Back${NC}"
+        safe_read "🎯 Select: " c 1
+        case $c in
+            1) docker image prune -a -f; force_refresh; press_enter ;;
+            2) docker image prune -f; force_refresh; press_enter ;;
+            3) docker buildx prune -f; press_enter ;;
+            4) docker volume prune -f; press_enter ;;
+            5) docker network prune -f; press_enter ;;
+            6) docker system prune -a -f; force_refresh; press_enter ;;
+            0) return ;;
+        esac
+    done
 }
 
-# ==========================================
-# EXECUTION
-# ==========================================
+# --- MAIN LOOP ---
 check_dependencies
+NEXT_MENU="main"
 while true; do
-    show_main_menu
-    case $choice in
-        1) images_submenu && continue || containers_submenu ;;
-        2) containers_submenu && continue || images_submenu ;;
-        3) cleanup_docker_system ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}❌ Error${NC}"; sleep 0.5 ;;
-    esac
+    if [ "$NEXT_MENU" == "main" ]; then
+        print_header
+        echo -e "${CYAN}1.${NC} 📦 Images"
+        echo -e "${CYAN}2.${NC} 🐳 Containers"
+        echo -e "${CYAN}3.${NC} 🧹 Extended Cleanup"
+        echo -e "${GREEN}h.${NC} ℹ️ Help"
+        echo -e "${RED}0. 🚪 Exit${NC}"
+        safe_read "Select: " c 1
+        case $c in
+            1) NEXT_MENU="images" ;;
+            2) NEXT_MENU="containers" ;;
+            3) cleanup_menu ;;
+            h|?) show_help_modal ;;
+            0) cleanup_exit; exit 0 ;;
+        esac
+    elif [ "$NEXT_MENU" == "images" ]; then
+        menu_images; ret=$?; if [ $ret -eq 2 ]; then NEXT_MENU="containers"; else NEXT_MENU="main"; fi
+    elif [ "$NEXT_MENU" == "containers" ]; then
+        menu_containers; ret=$?; if [ $ret -eq 2 ]; then NEXT_MENU="images"; else NEXT_MENU="main"; fi
+    fi
 done
