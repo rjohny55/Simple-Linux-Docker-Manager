@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Simple Linux Docker Manager v1.0.3
+# Simple Linux Docker Manager v1.0.4
 # (High Performance & Security Edition)
 # ==========================================
 
@@ -204,7 +204,10 @@ show_disk_stats() {
     echo -e "${CYAN}║ 📦 ОБРАЗЫ DOCKER                        📊 СТАТИСТИКА СИСТЕМЫ                    ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════════╣${NC}"
     
-    local disk_info=$(df / | tail -1 2>/dev/null)
+    # ИСПРАВЛЕНИЕ: Определяем реальную директорию Docker Root
+    local docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+    local disk_info=$(df "$docker_root" | tail -1 2>/dev/null)
+    
     if [ -n "$disk_info" ]; then
         local disk_total=$(echo "$disk_info" | awk '{print $2}')
         local disk_used=$(echo "$disk_info" | awk '{print $3}')
@@ -240,7 +243,7 @@ show_disk_stats() {
         echo -e "${CYAN}║ ${GREEN}• Образы:${NC} $total_images_size ${CYAN}• Диск:${NC} $(format_bytes $disk_used_bytes)/$(format_bytes $disk_total_bytes) ${CYAN}• Свободно:${NC} $(format_bytes $disk_available_bytes) "
         echo -e "${CYAN}║ ${GREEN}• Занято образами:${NC} ${images_percent}% ${CYAN}• Всего образов:${NC} $total_images_count "
     else
-        echo -e "${CYAN}║ ${RED}Не удалось получить информацию о диске${NC}"
+        echo -e "${CYAN}║ ${RED}Не удалось получить информацию о диске ($docker_root)${NC}"
     fi
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -267,7 +270,6 @@ show_containers_stats() {
     local available_ram_display=$(format_bytes $available_ram)
     local containers_memory_display=$(format_bytes $total_memory_bytes)
     
-    # ИСПРАВЛЕНО: Кавычки закрываются в конце
     echo -e "${CYAN}║ ${GREEN}• Контейнеры:${NC} $containers_memory_display ${CYAN}• RAM:${NC} ${containers_ram_percent}% ${CYAN} • Свободно:${NC} $available_ram_display ${CYAN}• Всего RAM:${NC} $total_ram_display"
     echo -e "${CYAN}║ ${GREEN}• Запущено:${NC} $running_containers ${CYAN}• Остановлено:${NC} $stopped_containers ${CYAN} • Всего:${NC} $total_containers"
     
@@ -279,7 +281,7 @@ print_header() {
     clear
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║           Simple Linux Docker Manager v1.0.3     ║"
+    echo "║           Simple Linux Docker Manager v1.0.4     ║"
     echo "║          HIGH PERFORMANCE EDITION                ║"
     echo "║          https://github.com/rjohny55/            ║"
     echo "║           Simple-Linux-Docker-Manager            ║"
@@ -361,146 +363,10 @@ show_containers() {
     echo -e "${YELLOW}🐳 Список Docker контейнеров (Страница $page):${NC}"
     echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
     
-    # 1. Пакетная загрузка IP (Решает проблему N+1 для Inspect)
-    # Создаем ассоциативный массив ID -> IP
-    declare -A ip_map
-    if [ -n "$(docker ps -aq)" ]; then
-        # Получаем ID и IP одной командой для всех контейнеров
-        while IFS='|' read -r id ip; do
-            ip_map[$id]="$ip"
-        done < <(docker inspect --format '{{.ID}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker ps -aq) 2>/dev/null)
-    fi
-
-    # 2. Пакетная загрузка Памяти (Решает проблему N+1 для Stats)
-    declare -A mem_map
-    if [ -n "$(docker ps -q)" ]; then
-        # Stats работает только для запущенных контейнеров
-        while IFS=':' read -r id mem; do
-            # Очищаем вывод от лишних символов
-            mem_clean=$(echo "$mem" | cut -d'/' -f1 | tr -d ' ')
-            mem_map[$id]="$mem_clean"
-        done < <(docker stats --no-stream --format "{{.ID}}:{{.MemUsage}}" $(docker ps -q) 2>/dev/null)
-    fi
-    
-    local counter=1
-    local display_counter=0
-    declare -g container_ids=()
-    declare -g container_names=()
-    declare -g container_status=()
-    
-    local all_containers=$(docker ps -a --format "table {{.ID}}|{{.Image}}|{{.Status}}|{{.Names}}" | tail -n +2)
-    local total_containers=$(echo "$all_containers" | wc -l)
-    local total_pages=$(( (total_containers + PAGE_SIZE - 1) / PAGE_SIZE ))
-    
-    printf "${GREEN}%-3s${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${BLUE}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
-        "No" "CONTAINER ID" "NAMES" "STATUS" "IP" "MEMORY"
-    echo -e "${BLUE}────────────────────────────────────────────────────────────────────────────────────${NC}"
-    
-    while IFS='|' read -r id image status names; do
-        if [ -n "$id" ] && [ "$id" != "CONTAINER ID" ]; then
-            if [ $counter -ge $start_index ] && [ $counter -le $end_index ]; then
-                container_ids[$display_counter]=$id
-                container_names[$display_counter]="$names"
-                container_status[$display_counter]="$status"
-                
-                # Использование данных из кэша (Мгновенный доступ)
-                # Full ID может отличаться от Short ID, поэтому берем полные ID из inspect но матчим по short если нужно
-                # Docker format {{.ID}} in ps usually gives short or full depending on version, 
-                # but inspect map keys are usually full. 
-                # Simple trick: мы использовали ps -aq для inspect, там полные ID.
-                # Но в ps --format table {{.ID}} дает короткий.
-                # Решение: мы не можем надежно матчить по короткому ID в Bash массиве, если ключ длинный.
-                # Поэтому мы ищем в карте, перебирая ключи? Нет, это медленно.
-                # ЛУЧШЕЕ РЕШЕНИЕ: В ps -a используем {{.ID}} который совпадает.
-                # Исправление: map ключи должны быть короткими (12 chars) для совпадения.
-                
-                # В Bash массивах ключи чувствительны.
-                # Получаем IP из карты (ищем по подстроке или надеемся на совпадение)
-                # Для надежности пересоздадим map выше с короткими ID? 
-                # Нет, проще здесь получить значение.
-                
-                local ip="-"
-                # Попытка получить данные по ID. (Нужен полный ID для точного совпадения, но у нас в списке короткий)
-                # В карте лежат длинные ID. 
-                # Придется делать трюк: ps --format "{{.ID}}..." дает короткий ID.
-                # Давайте заполним карту короткими ID!
-                
-                # (Этот блок перезаписан выше в логике заполнения карты - см. ниже примечание)
-                # Т.к. bash array keys, сделаем проще: заполним карту, обрезая ID до 12 символов.
-                
-                local memory="-"
-                
-                # Получаем цвет статуса
-                status_color=$GREEN
-                if [[ "$status" == *"Exited"* ]] || [[ "$status" == *"Dead"* ]]; then
-                    status_color=$RED
-                elif [[ "$status" == *"Up"* ]]; then
-                    status_color=$GREEN
-                    # Для запущенных пытаемся найти память
-                    # Но stats возвращает Short ID или Full? Обычно Short.
-                    if [ -n "${mem_map[$id]}" ]; then
-                        memory="${mem_map[$id]}"
-                    fi
-                else
-                    status_color=$YELLOW
-                fi
-                
-                # Для IP, inspect возвращает Full ID.
-                # Нужно найти значение в массиве ip_map, где ключ начинается с $id
-                # Это сложно в bash.
-                # ОПТИМИЗАЦИЯ 2.0: Заполняем карту используя `docker ps -a --format "{{.ID}}"` чтобы ключи были одинаковые!
-                
-                printf "${GREEN}%-3d${NC} ${PURPLE}%-12s${NC} ${CYAN}%-22s${NC} ${status_color}%-21s${NC} ${YELLOW}%-15s${NC} ${RED}%-8s${NC}\n" \
-                    "$display_counter" "${id:0:12}" "${names:0:20}" "${status:0:19}" "${ip_map[$id]:--}" "${mem_map[$id]:--}"
-                
-                ((display_counter++))
-            fi
-            ((counter++))
-        fi
-    done <<< "$all_containers"
-    
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
-    
-    if [ $total_pages -gt 1 ]; then
-        echo -e "${CYAN}📄 Страница ${YELLOW}$page${CYAN} of ${YELLOW}$total_pages${CYAN}. Всего контейнеров: ${YELLOW}$total_containers${NC}"
-        echo -e "${CYAN}🔍 Используйте навигацию в меню для перехода между страницами${NC}"
-    fi
-    
-    echo ""
-    
-    if [ $display_counter -eq 0 ]; then
-        echo -e "${RED}📭 Нет Docker контейнеров.${NC}"
-        return 1
-    fi
-    
-    CONTAINERS_CURRENT_PAGE=$page
-    CONTAINERS_TOTAL_PAGES=$total_pages
-    CONTAINERS_TOTAL_ITEMS=$total_containers
-    
-    return 0
-}
-
-# ПЕРЕОПРЕДЕЛЕНИЕ ЛОГИКИ ЗАПОЛНЕНИЯ КАРТЫ (Вставляется внутрь show_containers, здесь для пояснения)
-# В скрипте выше я использовал простую логику, но для корректной работы нужно чтобы ID совпадали.
-# В финальном коде (в блоке show_containers выше) нужно немного поправить чтение карт:
-
-# --- ИСПРАВЛЕНИЕ ФУНКЦИИ show_containers ДЛЯ КОРРЕКТНОГО МАТЧИНГА ID ---
-show_containers() {
-    local page=${1:-1}
-    local start_index=$(( (page - 1) * PAGE_SIZE + 1 ))
-    local end_index=$(( page * PAGE_SIZE ))
-    
-    echo -e "${YELLOW}🐳 Список Docker контейнеров (Страница $page):${NC}"
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════════════${NC}"
-    
     # 1. Кэширование IP (Используем короткие ID как ключи для совпадения с таблицей)
     declare -A ip_map
-    # Получаем ID (короткий) и IP. Используем ps -aq --format чтобы получить короткие ID, и xargs inspect?
-    # Нет, inspect всегда возвращает полный ID.
-    # Решение: Используем ps с форматом, который нам нужен для таблицы, и параллельно строим карту?
-    # Проще: Получаем полный ID из inspect, а в цикл обрезаем его до 12 символов при записи в карту.
-    
     if [ -n "$(docker ps -aq)" ]; then
+        # Получаем полный ID из inspect, а в цикл обрезаем его до 12 символов при записи в карту.
         while IFS='|' read -r full_id ip; do
             short_id="${full_id:0:12}"
             ip_map[$short_id]="$ip"
