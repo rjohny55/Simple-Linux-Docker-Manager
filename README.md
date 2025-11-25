@@ -1,8 +1,3 @@
-Вот обновленная версия `README.md`. Я интегрировал все новые функции (асинхронность, поиск, мониторинг CPU/RAM, расширенная очистка, поддержка macOS) и улучшил описание, чтобы оно звучало более профессионально и современно.
-
-Вы можете скопировать этот код прямо в файл `README.md`.
-
-```markdown
 # Simple Linux Docker Manager (SLDM) 🐳
 
 ![Version](https://img.shields.io/badge/version-1.2.2-blue) ![Bash](https://img.shields.io/badge/language-Bash-green) ![License](https://img.shields.io/badge/license-MIT-orange)
