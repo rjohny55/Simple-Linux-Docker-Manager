@@ -14,7 +14,7 @@ A powerful, lightweight, **asynchronous** command-line tool for managing Docker 
 ## 🇬🇧 English Version
 
 ### 📖 Overview
-SLDM v1.2.3
+SLDM v1.2.3 Final Release — best bash-docker manager 2025 year 
 Optimization & Hardware (System & Hardware)
 
     Moved Cache to RAM (/dev/shm):
@@ -117,7 +117,7 @@ chmod +x sldm
 ---
 
 ## 🇷🇺 Русская Версия / Russian Version
-
+SLDM v1.2.3 Final Release — лучший bash-докер-менеджер 2025 года
 ### 📖 Обзор
 # Simple Linux Docker Manager (SLDM) 🐳
 
