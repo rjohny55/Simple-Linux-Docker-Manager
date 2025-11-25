@@ -1,19 +1,26 @@
 #!/bin/bash
 
 # ==========================================
-# Simple Linux Docker Manager (SLDM) v1.2.2
-# UI Polish: Consistent Menu Separators
+# Simple Linux Docker Manager (SLDM) v1.2.3
+# Final Release: In-Memory Cache (/dev/shm)
 # https://github.com/rjohny55/Simple-Linux-Docker-Manager
 # ==========================================
 
 # Настройки оболочки
 set -o pipefail
 
+# Определение директории для кэша (RAM-диск для скорости и сбережения SSD)
+if [ -d "/dev/shm" ]; then
+    readonly TMP_DIR="/dev/shm"
+else
+    readonly TMP_DIR="/tmp"
+fi
+
 # Глобальные константы
 readonly PAGE_SIZE=50
 readonly CACHE_TTL=5
-readonly RAM_CACHE_FILE="/tmp/sldm_ram_$(id -u).cache"
-readonly RAM_LOCK_FILE="/tmp/sldm_ram_$(id -u).lock"
+readonly RAM_CACHE_FILE="$TMP_DIR/sldm_ram_$(id -u).cache"
+readonly RAM_LOCK_FILE="$TMP_DIR/sldm_ram_$(id -u).lock"
 
 # Глобальные переменные состояния
 declare -g IMAGES_CURRENT_PAGE=1
@@ -195,10 +202,14 @@ show_disk_stats() {
     local disk_info=$(df "$docker_root" | tail -1 2>/dev/null)
     local disk_total=$(echo "$disk_info" | awk '{print $2}')
     local disk_used=$(echo "$disk_info" | awk '{print $3}')
-    local images_size_raw=$(docker system df --format "{{.Type}}\t{{.Size}}" 2>/dev/null | grep "Images" | awk '{print $2 $3}')
+    
+    # Fix: Надежное получение размера образов
+    local images_size_raw=$(docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | awk '/Images/{print $2 $3}')
+    [ -z "$images_size_raw" ] && images_size_raw="0B"
+    
     local total_images_count=$(docker images -q 2>/dev/null | wc -l)
 
-    echo -e "${CYAN}║ 📦 ${GREEN}Образы:${NC} ${images_size_raw:-0B} (${total_images_count}) ${CYAN} │ Диск:${NC} $(format_bytes $((disk_used*1024)))/$(format_bytes $((disk_total*1024)))                             ${CYAN}║${NC}"
+    echo -e "${CYAN}║ 📦 ${GREEN}Образы:${NC} ${images_size_raw} (${total_images_count}) ${CYAN} │ Диск:${NC} $(format_bytes $((disk_used*1024)))/$(format_bytes $((disk_total*1024)))"
     if [ -n "$SEARCH_FILTER" ]; then
          echo -e "${CYAN}║ 🔍 ${YELLOW}ПОИСК:${NC} '$SEARCH_FILTER'${CYAN} (Сброс: '/')${NC}"
     fi
@@ -229,7 +240,7 @@ show_containers_stats() {
     fi
     
     local host_cpu=$(get_cpu_usage)
-    local c_info="Контейнеры.: ${total} (Запущены: ${running})"
+    local c_info="Контейнеры: ${total} (Запущены: ${running})"
     local r_info="RAM: ${docker_ram_display} / $(format_bytes $sys_ram_total)"
     local cpu_info="CPU: ${host_cpu}%"
     
@@ -274,7 +285,7 @@ print_header() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║          Simple Linux Docker Manager             ║${NC}"
-    echo -e "${CYAN}║          ${GREEN}v1.2.2 Final UI Polish${NC}                  ║${NC}"
+    echo -e "${CYAN}║          ${GREEN}v1.2.3 Final Release${NC}                    ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}\n"
 }
 
