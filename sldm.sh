@@ -1,32 +1,39 @@
 #!/bin/bash
 
 # ==========================================
-# Simple Linux Docker Manager (SLDM) v1.2.2
-# English Edition (Async, Auto-Refresh, UI Polish)
+# Simple Linux Docker Manager (SLDM) v1.2.3
+# Final Release: In-Memory Cache (/dev/shm)
 # https://github.com/rjohny55/Simple-Linux-Docker-Manager
 # ==========================================
 
-# Shell settings
+# Настройки оболочки
 set -o pipefail
 
-# Global Constants
+# Определение директории для кэша (RAM-диск для скорости и сбережения SSD)
+if [ -d "/dev/shm" ]; then
+    readonly TMP_DIR="/dev/shm"
+else
+    readonly TMP_DIR="/tmp"
+fi
+
+# Глобальные константы
 readonly PAGE_SIZE=50
 readonly CACHE_TTL=5
-readonly RAM_CACHE_FILE="/tmp/sldm_ram_$(id -u).cache"
-readonly RAM_LOCK_FILE="/tmp/sldm_ram_$(id -u).lock"
+readonly RAM_CACHE_FILE="$TMP_DIR/sldm_ram_$(id -u).cache"
+readonly RAM_LOCK_FILE="$TMP_DIR/sldm_ram_$(id -u).lock"
 
-# Global State Variables
+# Глобальные переменные состояния
 declare -g IMAGES_CURRENT_PAGE=1
 declare -g CONTAINERS_CURRENT_PAGE=1
 declare -g SEARCH_FILTER=""
 
-# Cache Variables
+# Переменные кэша
 declare -g CACHED_IMAGES_RAW=""
 declare -g CACHED_IMAGES_TIME=0
 declare -g CACHED_CONTAINERS_RAW=""
 declare -g CACHED_CONTAINERS_TIME=0
 
-# GLOBAL DATA ARRAYS
+# ГЛОБАЛЬНЫЕ МАССИВЫ ДАННЫХ
 declare -ga image_ids=()
 declare -ga image_names=()
 declare -ga image_tags=()
@@ -34,7 +41,7 @@ declare -ga container_ids=()
 declare -ga container_names=()
 declare -ga container_status=()
 
-# Colors
+# Цвета
 RED=$'\e[0;31m'
 GREEN=$'\e[0;32m'
 YELLOW=$'\e[1;33m'
@@ -45,25 +52,25 @@ ORANGE=$'\e[0;33m'
 GREY=$'\e[0;37m'
 NC=$'\e[0m'
 
-# --- SECURITY & CLEANUP ---
+# --- БЛОК БЕЗОПАСНОСТИ ---
 
 cleanup_exit() {
     stty echo 2>/dev/null
     unset docker_password
     rm -f "$RAM_CACHE_FILE" "$RAM_LOCK_FILE"
-    echo -e "\n${CYAN}👋 See you!${NC}"
+    echo -e "\n${CYAN}👋 До встречи!${NC}"
 }
 trap cleanup_exit EXIT SIGINT SIGTERM
 
 check_dependencies() {
     local missing=0
-    if ! command -v docker &> /dev/null; then echo -e "${RED}❌ Docker not found.${NC}"; missing=1; fi
-    if [ $missing -eq 0 ] && ! docker ps &> /dev/null; then echo -e "${RED}❌ No permissions for Docker.${NC}"; missing=1; fi
-    if [ "${BASH_VERSINFO:-0}" -lt 4 ]; then echo -e "${RED}❌ Bash 4.0+ required.${NC}"; missing=1; fi
+    if ! command -v docker &> /dev/null; then echo -e "${RED}❌ Docker не найден.${NC}"; missing=1; fi
+    if [ $missing -eq 0 ] && ! docker ps &> /dev/null; then echo -e "${RED}❌ Нет прав на Docker.${NC}"; missing=1; fi
+    if [ "${BASH_VERSINFO:-0}" -lt 4 ]; then echo -e "${RED}❌ Требуется Bash 4.0+.${NC}"; missing=1; fi
     if [ $missing -eq 1 ]; then exit 1; fi
 }
 
-# --- CACHING & ASYNC ---
+# --- КЭШИРОВАНИЕ И АСИНХРОННОСТЬ ---
 
 invalidate_cache() {
     CACHED_IMAGES_RAW=""
@@ -113,7 +120,7 @@ get_containers_list() {
     if [ -n "$SEARCH_FILTER" ]; then echo "$CACHED_CONTAINERS_RAW" | grep -i "$SEARCH_FILTER"; else echo "$CACHED_CONTAINERS_RAW"; fi
 }
 
-# --- UTILITIES ---
+# --- УТИЛИТЫ ---
 
 safe_read() {
     local secret=0 timeout=0 timeout_val=0 prompt="$1" var_name="$2" max_chars="${3:-100}"
@@ -187,7 +194,7 @@ get_cpu_usage() {
 
 check_cancel() { [[ "$1" =~ ^[cCсС]$ ]]; }
 
-# --- UI DISPLAY ---
+# --- ИНТЕРФЕЙС ---
 
 show_disk_stats() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
@@ -195,12 +202,16 @@ show_disk_stats() {
     local disk_info=$(df "$docker_root" | tail -1 2>/dev/null)
     local disk_total=$(echo "$disk_info" | awk '{print $2}')
     local disk_used=$(echo "$disk_info" | awk '{print $3}')
-    local images_size_raw=$(docker system df --format "{{.Type}}\t{{.Size}}" 2>/dev/null | grep "Images" | awk '{print $2 $3}')
+    
+    # Fix: Надежное получение размера образов
+    local images_size_raw=$(docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | awk '/Images/{print $2 $3}')
+    [ -z "$images_size_raw" ] && images_size_raw="0B"
+    
     local total_images_count=$(docker images -q 2>/dev/null | wc -l)
 
-    echo -e "${CYAN}║ 📦 ${GREEN}Images:${NC} ${images_size_raw:-0B} (${total_images_count}) ${CYAN} │ Disk:${NC} $(format_bytes $((disk_used*1024)))/$(format_bytes $((disk_total*1024)))                             ${CYAN}║${NC}"
+    echo -e "${CYAN}║ 📦 ${GREEN}Образы:${NC} ${images_size_raw} (${total_images_count}) ${CYAN} │ Диск:${NC} $(format_bytes $((disk_used*1024)))/$(format_bytes $((disk_total*1024)))"
     if [ -n "$SEARCH_FILTER" ]; then
-         echo -e "${CYAN}║ 🔍 ${YELLOW}SEARCH:${NC} '$SEARCH_FILTER'${CYAN} (Reset: '/')${NC}"
+         echo -e "${CYAN}║ 🔍 ${YELLOW}ПОИСК:${NC} '$SEARCH_FILTER'${CYAN} (Сброс: '/')${NC}"
     fi
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -212,7 +223,7 @@ show_containers_stats() {
     local running=$(docker ps -q 2>/dev/null | wc -l)
     local total=$(docker ps -aq 2>/dev/null | wc -l)
     
-    local docker_ram_display="Loading..."
+    local docker_ram_display="Загрузка..."
     if [ -f "$RAM_CACHE_FILE" ]; then
         local cached_bytes=$(cat "$RAM_CACHE_FILE")
         docker_ram_display=$(format_bytes "$cached_bytes")
@@ -229,7 +240,7 @@ show_containers_stats() {
     fi
     
     local host_cpu=$(get_cpu_usage)
-    local c_info="Containers: ${total} (Run: ${running})"
+    local c_info="Контейнеры: ${total} (Запущены: ${running})"
     local r_info="RAM: ${docker_ram_display} / $(format_bytes $sys_ram_total)"
     local cpu_info="CPU: ${host_cpu}%"
     
@@ -245,7 +256,7 @@ show_containers_stats() {
     printf "%s\n" "${SPACES:0:$pad}"
 
     if [ -n "$SEARCH_FILTER" ]; then
-         echo -e "${CYAN}║ 🔍 ${YELLOW}SEARCH:${NC} '$SEARCH_FILTER'${CYAN} (Reset: '/')${NC}"
+         echo -e "${CYAN}║ 🔍 ${YELLOW}ПОИСК:${NC} '$SEARCH_FILTER'${CYAN} (Сброс: '/')${NC}"
     fi
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -254,18 +265,18 @@ show_containers_stats() {
 show_help_modal() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║                    HELP MENU                     ║${NC}"
+    echo -e "${CYAN}║                 СПРАВКА (HELP)                   ║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${NC} ${GREEN}Navigation:${NC}                                      ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  n / p     - Next / Previous Page                ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  9         - Switch Images <-> Containers        ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  0         - Back / Exit                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC} ${GREEN}Навигация:${NC}                                       ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  n / p     - Следующая / Предыдущая страница     ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  9         - Переключение Образы <-> Контейнеры  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  0         - Назад / Выход                       ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC} ${YELLOW}Actions:${NC}                                         ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  r         - Refresh + Recalc RAM                ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  / or 8    - Search / Filter                     ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  1-7       - Select Menu Item                    ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  h or ?    - Show Help                           ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC} ${YELLOW}Действия:${NC}                                        ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  r         - Обновить + Пересчитать память       ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  / или 8   - Поиск / Фильтр                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  1-7       - Выбор пункта меню                   ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  h или ?   - Эта справка                         ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
     press_enter
 }
@@ -274,13 +285,13 @@ print_header() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║          Simple Linux Docker Manager             ║${NC}"
-    echo -e "${CYAN}║          ${GREEN}v1.2.2 English Edition${NC}                  ║${NC}"
+    echo -e "${CYAN}║          ${GREEN}v1.2.3 Final Release${NC}                    ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}\n"
 }
 
-press_enter() { echo ""; safe_read "${CYAN}Press Enter...${NC}" dummy; }
+press_enter() { echo ""; safe_read "${CYAN}Нажмите Enter...${NC}" dummy; }
 
-# --- LIST VIEWS ---
+# --- СПИСКИ (CORE) ---
 
 show_images() {
     local page=${1:-1}
@@ -294,7 +305,7 @@ show_images() {
     local total_items=$(echo "$data" | grep -c . || echo 0)
     local total_pages=$(( (total_items + PAGE_SIZE - 1) / PAGE_SIZE ))
     
-    echo -e "${YELLOW}📦 Image List${NC} (Page $page/$total_pages | Total: $total_items)"
+    echo -e "${YELLOW}📦 Список образов${NC} (Стр. $page/$total_pages | Всего: $total_items)"
     echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
     
     local i=1
@@ -313,7 +324,7 @@ show_images() {
     done <<< "$data"
     
     echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
-    [ $total_items -eq 0 ] && echo -e "${RED}📭 No images found${NC}"
+    [ $total_items -eq 0 ] && echo -e "${RED}📭 Ничего не найдено${NC}"
     IMAGES_TOTAL_PAGES=$total_pages
     return 0
 }
@@ -335,15 +346,15 @@ show_containers() {
     local total_items=$(echo "$data" | grep -c . || echo 0)
     local total_pages=$(( (total_items + PAGE_SIZE - 1) / PAGE_SIZE ))
     
-    echo -e "${YELLOW}🐳 Container List${NC} (Page $page/$total_pages | Total: $total_items)"
+    echo -e "${YELLOW}🐳 Список контейнеров${NC} (Стр. $page/$total_pages | Всего: $total_items)"
     echo -e "${BLUE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     
     local SPACES="                                                                                                    "
     local W_NAME=50
     local W_STATUS=20
 
-    local h_name="CONTAINER NAME"
-    local h_status="STATUS"
+    local h_name="ИМЯ КОНТЕЙНЕРА"
+    local h_status="СТАТУС"
     
     local pad_h_name="${SPACES:0:$((W_NAME - ${#h_name}))}"
     local pad_h_status="${SPACES:0:$((W_STATUS - ${#h_status}))}"
@@ -397,11 +408,11 @@ show_containers() {
     return 0
 }
 
-# --- ACTIONS & MENUS ---
+# --- ДЕЙСТВИЯ И МЕНЮ ---
 
 set_filter() {
-    echo -e "${YELLOW}🔍 Search / Filter${NC}"
-    echo -e "Enter text (empty to reset):"
+    echo -e "${YELLOW}🔍 Поиск / Фильтр${NC}"
+    echo -e "Введите текст (пусто для сброса):"
     safe_read "> " input 20
     SEARCH_FILTER="$input"
     IMAGES_CURRENT_PAGE=1
@@ -410,34 +421,34 @@ set_filter() {
 }
 
 update_image() {
-    safe_read "${CYAN}Number: ${NC}" num 5
+    safe_read "${CYAN}Номер: ${NC}" num 5
     [ -z "${image_ids[$num]}" ] && return
     local full="${image_names[$num]}:${image_tags[$num]}"
-    [[ "$full" == *"<none>"* ]] && echo "${RED}Error: <none>${NC}" && return
-    echo "Pulling $full..."
-    docker pull "$full" && force_refresh && echo "${GREEN}Done${NC}" || echo "${RED}Error${NC}"
+    [[ "$full" == *"<none>"* ]] && echo "${RED}Ошибка: <none>${NC}" && return
+    echo "Скачивание $full..."
+    docker pull "$full" && force_refresh && echo "${GREEN}Готово${NC}" || echo "${RED}Ошибка${NC}"
 }
 
 docker_push() {
-    safe_read "${CYAN}Number: ${NC}" num 5
+    safe_read "${CYAN}Номер: ${NC}" num 5
     [ -z "${image_ids[$num]}" ] && return
     local full="${image_names[$num]}:${image_tags[$num]}"
-    safe_read "${CYAN}Username: ${NC}" user 50
-    safe_read -s "${CYAN}Password: ${NC}" pass 200
+    safe_read "${CYAN}Логин: ${NC}" user 50
+    safe_read -s "${CYAN}Пароль: ${NC}" pass 200
     echo "$pass" | docker login --username "$user" --password-stdin
     local ret=$?
     unset pass
-    if [ $ret -eq 0 ]; then docker push "$full" && echo "${GREEN}Success${NC}"; docker logout; else echo "${RED}Login Failed${NC}"; fi
+    if [ $ret -eq 0 ]; then docker push "$full" && echo "${GREEN}Успешно${NC}"; docker logout; else echo "${RED}Ошибка входа${NC}"; fi
     force_refresh
 }
 
 batch_action() {
     local type=$1 action=$2
-    echo -e "${YELLOW}Enter numbers (space separated):${NC}"
+    echo -e "${YELLOW}Введите номера (через пробел):${NC}"
     safe_read "> " input 50
     check_cancel "$input" && return
     read -a nums <<< "$input"
-    echo "Processing..."
+    echo "Выполняем..."
     for n in "${nums[@]}"; do
         local id=""
         [ "$type" == "img" ] && id="${image_ids[$n]}"
@@ -461,15 +472,15 @@ menu_images() {
     rm -f "$RAM_CACHE_FILE"
     while true; do
         print_header; show_disk_stats; show_images "$IMAGES_CURRENT_PAGE"
-        echo -e "${CYAN}1-3${NC} Del/Prune/All | ${CYAN}4-5${NC} None/Cache | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Search"
-        [ $IMAGES_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} Next/Prev Page"
-        echo -e "${GREEN}9${NC} To Containers | ${GREEN}0${NC} Back | ${GREEN}h${NC} Help"
+        echo -e "${CYAN}1-3${NC} Удалить/Очистить/Все | ${CYAN}4-5${NC} None/Кеш | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Поиск"
+        [ $IMAGES_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} След/Пред страница"
+        echo -e "${GREEN}9${NC} К контейнерам | ${GREEN}0${NC} Назад | ${GREEN}h${NC} Справка"
         
-        safe_read "🎯 Select: " c 1
+        safe_read "🎯 Выбор: " c 1
         case $c in
             1) batch_action "img" "rmi" ;;
             2) docker image prune -a -f; force_refresh; press_enter ;;
-            3) safe_read "Type DELETE to confirm: " conf; [ "$conf" == "DELETE" ] && (docker images -q | xargs -r docker rmi -f); force_refresh; press_enter ;;
+            3) safe_read "Введите DELETE для подтверждения: " conf; [ "$conf" == "DELETE" ] && (docker images -q | xargs -r docker rmi -f); force_refresh; press_enter ;;
             4) docker image prune -f; force_refresh; press_enter ;;
             5) docker buildx prune -f; press_enter ;;
             6) update_image; press_enter ;;
@@ -490,9 +501,9 @@ menu_containers() {
         print_header; show_containers_stats; show_containers "$CONTAINERS_CURRENT_PAGE"
         if [ -f "$RAM_CACHE_FILE" ]; then ram_state=1; else ram_state=0; fi
         
-        echo -e "${CYAN}1${NC} Stop | ${CYAN}2${NC} Start | ${CYAN}3${NC} Remove | ${CYAN}4${NC} Kill | ${CYAN}5${NC} Search | ${GREEN}r${NC} Refresh"
-        [ $CONTAINERS_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} Next/Prev Page"
-        echo -e "${GREEN}9${NC} To Images | ${GREEN}0${NC} Back | ${GREEN}h${NC} Help"
+        echo -e "${CYAN}1${NC} Стоп | ${CYAN}2${NC} Старт | ${CYAN}3${NC} Удалить | ${CYAN}4${NC} Kill | ${CYAN}5${NC} Поиск | ${GREEN}r${NC} Обновить"
+        [ $CONTAINERS_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} След/Пред страница"
+        echo -e "${GREEN}9${NC} К образам | ${GREEN}0${NC} Назад | ${GREEN}h${NC} Справка"
         
         local c=""
         while true; do
@@ -519,15 +530,15 @@ menu_containers() {
 cleanup_menu() {
     while true; do
         print_header
-        echo -e "${YELLOW}🧹 Docker Cleanup Menu${NC}"
-        echo -e "${CYAN}1.${NC} Remove unused images (prune -a)"
-        echo -e "${CYAN}2.${NC} Remove dangling images (prune)"
-        echo -e "${CYAN}3.${NC} Clear build cache (buildx prune)"
-        echo -e "${CYAN}4.${NC} Remove unused volumes (Volume prune)"
-        echo -e "${CYAN}5.${NC} Remove unused networks (Network prune)"
-        echo -e "${RED}6. Full system cleanup (System prune -a)${NC}"
-        echo -e "${GREEN}0. Back${NC}"
-        safe_read "🎯 Select: " c 1
+        echo -e "${YELLOW}🧹 Меню очистки Docker${NC}"
+        echo -e "${CYAN}1.${NC} Удалить неиспользуемые образы (prune -a)"
+        echo -e "${CYAN}2.${NC} Удалить Dangling образы (prune)"
+        echo -e "${CYAN}3.${NC} Очистить кэш сборок (buildx prune)"
+        echo -e "${CYAN}4.${NC} Удалить неиспользуемые тома (Volume prune)"
+        echo -e "${CYAN}5.${NC} Удалить неиспользуемые сети (Network prune)"
+        echo -e "${RED}6. Полная очистка системы (System prune -a)${NC}"
+        echo -e "${GREEN}0. Назад${NC}"
+        safe_read "🎯 Выбор: " c 1
         case $c in
             1) docker image prune -a -f; force_refresh; press_enter ;;
             2) docker image prune -f; force_refresh; press_enter ;;
@@ -546,12 +557,12 @@ NEXT_MENU="main"
 while true; do
     if [ "$NEXT_MENU" == "main" ]; then
         print_header
-        echo -e "${CYAN}1.${NC} 📦 Images"
-        echo -e "${CYAN}2.${NC} 🐳 Containers"
-        echo -e "${CYAN}3.${NC} 🧹 Extended Cleanup"
-        echo -e "${GREEN}h.${NC} ℹ️ Help"
-        echo -e "${RED}0. 🚪 Exit${NC}"
-        safe_read "Select: " c 1
+        echo -e "${CYAN}1.${NC} 📦 Образы"
+        echo -e "${CYAN}2.${NC} 🐳 Контейнеры"
+        echo -e "${CYAN}3.${NC} 🧹 Расширенная очистка (Тома, Сети, Кэш)"
+        echo -e "${GREEN}h.${NC} ℹ️ Справка"
+        echo -e "${RED}0. 🚪 Выход${NC}"
+        safe_read "Выбор: " c 1
         case $c in
             1) NEXT_MENU="images" ;;
             2) NEXT_MENU="containers" ;;
