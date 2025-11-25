@@ -1,6 +1,8 @@
 # Simple Linux Docker Manager (SLDM) 🐳
 
-![Version](https://img.shields.io/badge/version-1.2.2-blue) ![Bash](https://img.shields.io/badge/language-Bash-green) ![License](https://img.shields.io/badge/license-Apache-orange)
+![Version](https://img.shields.io/badge/version-1.2.2-blue) [![Bash](https://img.shields.io/badge/Bash-4.4%2B-green)](https://www.gnu.org/software/bash/) [![Docker](https://img.shields.io/badge/Docker-20.10%2B-blue)](https://docker.com) ![License](https://img.shields.io/badge/license-Apache-orange) [![Stars](https://img.shields.io/github/stars/rjohny55/Simple-Linux-Docker-Manager?style=social)](https://github.com/rjohny55/Simple-Linux-Docker-Manager)
+
+
 
 A powerful, lightweight, **asynchronous** command-line tool for managing Docker images, containers, volumes, and networks. Features a beautiful TUI (Text User Interface), real-time system monitoring, and instant responsiveness.
 
