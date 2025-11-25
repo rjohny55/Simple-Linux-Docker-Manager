@@ -60,7 +60,9 @@ It uses a **Smart Event Loop** and **Background Processing** to calculate heavy 
     ✅ Embedded Linux systems
 
 ### 🛠️ Installation
-
+```bash
+curl -sSL https://raw.githubusercontent.com/rjohny55/Simple-Linux-Docker-Manager/main/sldm.sh -o ~/bin/sldm && chmod +x ~/bin/sldm
+```
 #### Method 1: Direct Download
 ```bash
 # Download
@@ -129,7 +131,9 @@ chmod +x sldm
 - **Новое:** Очистка кэша сборки (Buildx).
 
 ### 🛠️ Установка
-
+```bash
+curl -sSL https://raw.githubusercontent.com/rjohny55/Simple-Linux-Docker-Manager/main/sldm.sh -o ~/bin/sldm && chmod +x ~/bin/sldm
+```
 #### Способ 1: Прямая загрузка
 ```bash
 # Скачать
