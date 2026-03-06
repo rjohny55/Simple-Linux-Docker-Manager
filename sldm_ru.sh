@@ -505,6 +505,40 @@ docker_push() {
     force_refresh
 }
 
+show_image_history() {
+    safe_read "${CYAN}Номер: ${NC}" num 5
+    [ -z "${image_ids[$num]}" ] && return
+    
+    local full="${image_names[$num]}:${image_tags[$num]}"
+    local id="${image_ids[$num]}"
+
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║ 🔍 ${YELLOW}История слоев:${NC} ${GREEN}$full${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Шапка таблицы
+    printf "${GREEN}%-15s${NC} ${YELLOW}%-10s${NC} ${CYAN}%s${NC}\n" "LAYER ID" "РАЗМЕР" "КОМАНДА (Обрезано до 80 симв.)"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+
+    # Запрашиваем историю без обрезки (--no-trunc) и парсим через IFS
+    docker history --no-trunc --format "{{.ID}}|{{.Size}}|{{.CreatedBy}}" "$id" | while IFS='|' read -r layer_id size cmd; do
+        
+        # Если ID отсутствует, Docker пишет <missing>
+        local clean_id="$layer_id"
+        [[ "$clean_id" == "<missing>" ]] && clean_id="<missing>" || clean_id="${layer_id:0:12}"
+
+        # Очищаем команду от лишних пробелов и обрезаем, чтобы не переносить строки
+        local clean_cmd=$(echo "$cmd" | sed 's/  \+/ /g' | cut -c 1-80)
+
+        printf "${PURPLE}%-15s${NC} ${RED}%-10s${NC} ${GREY}%s${NC}\n" "$clean_id" "$size" "$clean_cmd"
+    done
+
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+    press_enter
+}
+
 batch_action() {
     local type=$1 action=$2
     echo -e "${YELLOW}Введите номера (через пробел):${NC}"
@@ -535,7 +569,7 @@ menu_images() {
     rm -f "$RAM_CACHE_FILE"
     while true; do
         print_header; show_disk_stats; show_images "$IMAGES_CURRENT_PAGE"
-        echo -e "${CYAN}1-3${NC} Удалить/Очистить/Все | ${CYAN}4-5${NC} None/Кеш | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Поиск"
+        echo -e "${CYAN}1-3${NC} Удалить/Очистить/Все | ${CYAN}4-5${NC} None/Кеш | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Поиск | ${CYAN}s${NC} Слои"
         [ $IMAGES_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} След/Пред страница"
         echo -e "${GREEN}9${NC} К контейнерам | ${GREEN}0${NC} Назад | ${GREEN}h${NC} Справка"
 
@@ -549,6 +583,7 @@ menu_images() {
             6) update_image; press_enter ;;
             7) docker_push; press_enter ;;
             8|/) set_filter ;;
+            s|S) show_image_history ;;
             9) return 2 ;;
             h|\?) show_help_modal ;;
             n) [ $IMAGES_CURRENT_PAGE -lt $IMAGES_TOTAL_PAGES ] && ((IMAGES_CURRENT_PAGE++)) ;;
