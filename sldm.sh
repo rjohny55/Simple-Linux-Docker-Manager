@@ -501,11 +501,46 @@ docker_push() {
     echo "$pass" | docker login --username "$user" --password-stdin
     local ret=$?
     unset pass
-    if [ $ret -eq 0 ]; then docker push "$full" && echo "${GREEN}Success${NC}"; docker logout; else echo "${RED}Error входа${NC}"; fi
+    if [ $ret -eq 0 ]; then docker push "$full" && echo "${GREEN}Success${NC}"; docker logout; else echo "${RED}Login error${NC}"; fi
     force_refresh
 }
 
+show_image_history() {
+    safe_read "${CYAN}Number: ${NC}" num 5
+    [ -z "${image_ids[$num]}" ] && return
+
+    local full="${image_names[$num]}:${image_tags[$num]}"
+    local id="${image_ids[$num]}"
+
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║ 🔍 ${YELLOW}Layer History:${NC} ${GREEN}$full${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+
+    # Table header
+    printf "${GREEN}%-15s${NC} ${YELLOW}%-10s${NC} ${CYAN}%s${NC}\n" "LAYER ID" "SIZE" "COMMAND (Truncated to 80 chars)"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+
+    # Request history with --no-trunc and parse via IFS
+    docker history --no-trunc --format "{{.ID}}|{{.Size}}|{{.CreatedBy}}" "$id" | while IFS='|' read -r layer_id size cmd; do
+
+        # If ID is missing, Docker writes <missing>
+        local clean_id="$layer_id"
+        [[ "$clean_id" == "<missing>" ]] && clean_id="<missing>" || clean_id="${layer_id:0:12}"
+
+        # Clean command from extra spaces and truncate to avoid line breaks
+        local clean_cmd=$(echo "$cmd" | sed 's/  \+/ /g' | cut -c 1-80)
+
+        printf "${PURPLE}%-15s${NC} ${RED}%-10s${NC} ${GREY}%s${NC}\n" "$clean_id" "$size" "$clean_cmd"
+    done
+
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+    press_enter
+}
+
 batch_action() {
+
     local type=$1 action=$2
     echo -e "${YELLOW}Enter numbers (space separated):${NC}"
     safe_read "> " input 50
@@ -535,9 +570,9 @@ menu_images() {
     rm -f "$RAM_CACHE_FILE"
     while true; do
         print_header; show_disk_stats; show_images "$IMAGES_CURRENT_PAGE"
-        echo -e "${CYAN}1-3${NC} Delete/Prune/All | ${CYAN}4-5${NC} None/Cache | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Поиск"
+        echo -e "${CYAN}1-3${NC} Delete/Prune/All | ${CYAN}4-5${NC} None/Cache | ${CYAN}6${NC} Pull | ${CYAN}7${NC} Push | ${CYAN}8${NC} Search | ${CYAN}s${NC} Layers"
         [ $IMAGES_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} Next/Prev page"
-        echo -e "${GREEN}9${NC} To Containers | ${GREEN}0${NC} Back | ${GREEN}h${NC} Справка"
+        echo -e "${GREEN}9${NC} To Containers | ${GREEN}0${NC} Back | ${GREEN}h${NC} Help"
 
         safe_read "🎯 Choice: " c 1
         case $c in
@@ -549,6 +584,7 @@ menu_images() {
             6) update_image; press_enter ;;
             7) docker_push; press_enter ;;
             8|/) set_filter ;;
+            s|S) show_image_history ;;
             9) return 2 ;;
             h|\?) show_help_modal ;;
             n) [ $IMAGES_CURRENT_PAGE -lt $IMAGES_TOTAL_PAGES ] && ((IMAGES_CURRENT_PAGE++)) ;;
@@ -564,9 +600,9 @@ menu_containers() {
         print_header; show_containers_stats; show_containers "$CONTAINERS_CURRENT_PAGE"
         if [ -f "$RAM_CACHE_FILE" ]; then ram_state=1; else ram_state=0; fi
 
-        echo -e "${CYAN}1${NC} Stop | ${CYAN}2${NC} Start | ${CYAN}3${NC} Delete | ${CYAN}4${NC} Kill | ${CYAN}5${NC} Поиск | ${GREEN}r${NC} Refresh"
+        echo -e "${CYAN}1${NC} Stop | ${CYAN}2${NC} Start | ${CYAN}3${NC} Delete | ${CYAN}4${NC} Kill | ${CYAN}5${NC} Search | ${GREEN}r${NC} Refresh"
         [ $CONTAINERS_TOTAL_PAGES -gt 1 ] && echo -e "${CYAN}n/p${NC} Next/Prev page"
-        echo -e "${GREEN}9${NC} To Images | ${GREEN}0${NC} Back | ${GREEN}h${NC} Справка"
+        echo -e "${GREEN}9${NC} To Images | ${GREEN}0${NC} Back | ${GREEN}h${NC} Help"
 
         local c=""
         while true; do
@@ -594,11 +630,11 @@ cleanup_menu() {
     while true; do
         print_header
         echo -e "${YELLOW}🧹 Docker Cleanup Menu${NC}"
-        echo -e "${CYAN}1.${NC} Delete неиспользуемые образы (prune -a)"
-        echo -e "${CYAN}2.${NC} Delete Dangling образы (prune)"
+        echo -e "${CYAN}1.${NC} Remove unused images (prune -a)"
+        echo -e "${CYAN}2.${NC} Remove dangling images (prune)"
         echo -e "${CYAN}3.${NC} Clear build cache (buildx prune)"
-        echo -e "${CYAN}4.${NC} Delete неиспользуемые тома (Volume prune)"
-        echo -e "${CYAN}5.${NC} Delete неиспользуемые сети (Network prune)"
+        echo -e "${CYAN}4.${NC} Remove unused volumes (Volume prune)"
+        echo -e "${CYAN}5.${NC} Remove unused networks (Network prune)"
         echo -e "${RED}6. Full system prune (System prune -a)${NC}"
         echo -e "${GREEN}0. Back${NC}"
         safe_read "🎯 Choice: " c 1
@@ -623,7 +659,7 @@ while true; do
         echo -e "${CYAN}1.${NC} 📦 Images"
         echo -e "${CYAN}2.${NC} 🐳 Containers"
         echo -e "${CYAN}3.${NC} 🧹 Advanced Cleanup (Volumes, Networks, Cache)"
-        echo -e "${GREEN}h.${NC} ℹ️ Справка"
+        echo -e "${GREEN}h.${NC} ℹ️ Help"
         echo -e "${RED}0. 🚪 Exit${NC}"
         safe_read "Choice: " c 1
         case $c in
